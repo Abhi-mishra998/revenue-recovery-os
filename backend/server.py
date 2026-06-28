@@ -669,23 +669,29 @@ async def migrate_legacy_fields():
 
 # ---------- Seed admin (email/password) ----------
 async def seed_admin():
+    """
+    Create the admin user on first boot only. After that, never touch the
+    password — rotation is the user's responsibility, not the server's.
+    Requires ADMIN_PASSWORD env var if no admin exists yet; otherwise no-op.
+    """
     admin_email = os.environ.get("ADMIN_EMAIL", "founder@bytehubble.com").lower()
-    admin_password = os.environ.get("ADMIN_PASSWORD", "ByteHubble@2025")
     existing = await db.users.find_one({"email": admin_email})
-    if existing is None:
-        user_id = str(uuid.uuid4())
-        await db.users.insert_one({
-            "id": user_id, "email": admin_email,
-            "name": "ByteHubble Founder",
-            "auth_provider": "email",
-            "password_hash": hash_password(admin_password),
-            "created_at": now_utc().isoformat(),
-        })
-        await seed_demo_for_owner(db, user_id)
-    else:
-        if existing.get("auth_provider", "email") == "email" and not verify_password(admin_password, existing.get("password_hash", "")):
-            await db.users.update_one({"email": admin_email}, {"$set": {"password_hash": hash_password(admin_password)}})
+    if existing is not None:
         await seed_demo_for_owner(db, existing["id"])
+        return
+    admin_password = os.environ.get("ADMIN_PASSWORD")
+    if not admin_password:
+        logger.warning("ADMIN_PASSWORD not set and no admin user exists — skipping admin seed.")
+        return
+    user_id = str(uuid.uuid4())
+    await db.users.insert_one({
+        "id": user_id, "email": admin_email,
+        "name": "ByteHubble Founder",
+        "auth_provider": "email",
+        "password_hash": hash_password(admin_password),
+        "created_at": now_utc().isoformat(),
+    })
+    await seed_demo_for_owner(db, user_id)
 
 
 @api.get("/")
