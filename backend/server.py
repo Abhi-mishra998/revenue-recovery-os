@@ -5,6 +5,7 @@ from dotenv import load_dotenv
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / ".env")
 
+import asyncio
 import logging
 import os
 import time
@@ -499,11 +500,14 @@ async def create_client(payload: ClientCreate, user: dict = Depends(get_current_
 
 @api.get("/clients/{client_id}")
 async def get_client(client_id: str, user: dict = Depends(get_current_user)):
-    c = await clients_repo.get_for_owner(client_id, user["id"])
+    # Three independent reads — fan out instead of three serial round-trips.
+    c, proposals, invoices = await asyncio.gather(
+        clients_repo.get_for_owner(client_id, user["id"]),
+        proposals_repo.list_for_client_and_owner(client_id, user["id"], limit=500),
+        invoices_repo.list_for_client_and_owner(client_id, user["id"], limit=500),
+    )
     if not c:
         raise HTTPException(404, "Client not found")
-    proposals = await proposals_repo.list_for_client_and_owner(client_id, user["id"], limit=500)
-    invoices = await invoices_repo.list_for_client_and_owner(client_id, user["id"], limit=500)
     return {
         "client": c,
         "proposals": [serialize_proposal(p) for p in proposals],
@@ -561,8 +565,10 @@ async def _clients_map_for(owner_id: str) -> dict:
 
 @api.get("/proposals")
 async def list_proposals(user: dict = Depends(get_current_user)):
-    rows = await proposals_repo.list_for_owner(user["id"])
-    clients_map = await _clients_map_for(user["id"])
+    rows, clients_map = await asyncio.gather(
+        proposals_repo.list_for_owner(user["id"]),
+        _clients_map_for(user["id"]),
+    )
     out = [serialize_proposal(p, clients_map) for p in rows]
     out.sort(key=lambda x: x["days_silent"], reverse=True)
     return out
@@ -603,10 +609,13 @@ async def get_proposal(proposal_id: str, user: dict = Depends(get_current_user))
     p = await proposals_repo.get_for_owner(proposal_id, user["id"])
     if not p:
         raise HTTPException(404, "Proposal not found")
-    c = await clients_repo.get_for_owner(p["client_id"], user["id"]) or {}
+    # client + memory are independent — fan out.
+    c, memory = await asyncio.gather(
+        clients_repo.get_for_owner(p["client_id"], user["id"]),
+        memory_repo.get(user["id"], p["client_id"]),
+    )
+    c = c or {}
     out = serialize_proposal(p, {p["client_id"]: c})
-    # Live inference: heuristic baseline; trained model swaps behind same shape later.
-    memory = await memory_repo.get(user["id"], p["client_id"])
     enriched_proposal = {**p, "client_industry": c.get("industry")}
     features = extract_proposal_features(proposal=enriched_proposal, memory=memory)
     out["prediction"] = predict_close_probability(features).to_dict()
@@ -693,8 +702,10 @@ async def delete_proposal(proposal_id: str, user: dict = Depends(get_current_use
 # ---------- Invoices ----------
 @api.get("/invoices")
 async def list_invoices(user: dict = Depends(get_current_user)):
-    rows = await invoices_repo.list_for_owner(user["id"])
-    clients_map = await _clients_map_for(user["id"])
+    rows, clients_map = await asyncio.gather(
+        invoices_repo.list_for_owner(user["id"]),
+        _clients_map_for(user["id"]),
+    )
     out = [serialize_invoice(inv, clients_map) for inv in rows]
     out.sort(key=lambda x: x["days_overdue"], reverse=True)
     return out
@@ -924,16 +935,35 @@ def compute_dashboard_summary(proposals: List[dict], invoices: List[dict], clien
 
 @api.get("/dashboard/summary")
 async def dashboard_summary(user: dict = Depends(get_current_user)):
-    proposals = await proposals_repo.list_for_dashboard(user["id"])
-    invoices = await invoices_repo.list_for_dashboard(user["id"])
-    clients_map = await _clients_map_for(user["id"])
+    # Three independent reads — fan out instead of three serial round-trips.
+    proposals, invoices, clients_map = await asyncio.gather(
+        proposals_repo.list_for_dashboard(user["id"]),
+        invoices_repo.list_for_dashboard(user["id"]),
+        _clients_map_for(user["id"]),
+    )
     return compute_dashboard_summary(proposals, invoices, clients_map)
 
 
 # ---------- Admin: AI kill-switch ----------
+# In-process cache. The killswitch is checked on EVERY generate-followup call;
+# without this it does a DB read per call (cheap but unnecessary).
+# ponytail: single-process cache — multi-process deploys need DB poll or pub/sub.
+# `_killswitch_cache` is None until first read; toggle endpoint invalidates it.
+_killswitch_cache: Optional[bool] = None
+
+
 async def ai_killswitch_enabled() -> bool:
-    doc = await settings_repo.get_global()
-    return bool(doc and doc.get("ai_killswitch"))
+    global _killswitch_cache
+    if _killswitch_cache is None:
+        doc = await settings_repo.get_global()
+        _killswitch_cache = bool(doc and doc.get("ai_killswitch"))
+    return _killswitch_cache
+
+
+def _invalidate_killswitch_cache(new_value: bool) -> None:
+    """Called by the toggle endpoint — single-process cache stays consistent."""
+    global _killswitch_cache
+    _killswitch_cache = new_value
 
 
 class KillSwitchReq(BaseModel):
@@ -948,6 +978,7 @@ async def get_killswitch(admin: dict = Depends(require_admin)):
 @api.post("/admin/killswitch")
 async def set_killswitch(req: KillSwitchReq, admin: dict = Depends(require_admin)):
     await settings_repo.set_ai_killswitch(req.enabled)
+    _invalidate_killswitch_cache(req.enabled)
     await append_audit(
         action="admin.killswitch.set",
         actor_id=admin["id"],
