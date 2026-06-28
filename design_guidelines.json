@@ -1,0 +1,68 @@
+{
+  "theme": {
+    "mode": "light",
+    "archetype": "Blend of Archetype 4 (Swiss/High-Contrast) & Archetype 1 (Organic & Earthy)",
+    "description": "A warm, Indian-business friendly yet sharp, editorial fintech SaaS dashboard. Combines the gravitas of traditional wealth management (serif typography) with the efficiency of modern SaaS (dense data, flat borders)."
+  },
+  "colors": {
+    "background": "#FAF9F6",
+    "surface": "#FFFFFF",
+    "surface_glass": "bg-white/70 backdrop-blur-xl",
+    "text_primary": "#1C1917",
+    "text_secondary": "#57534E",
+    "accent_primary": "#D97706",
+    "accent_hover": "#B45309",
+    "status": {
+      "active": { "bg": "#DCFCE7", "text": "#166534", "border": "#86EFAC" },
+      "cold": { "bg": "#FFEDD5", "text": "#9A3412", "border": "#FDBA74" },
+      "dead": { "bg": "#F5F5F4", "text": "#57534E", "border": "#D6D3D1" }
+    },
+    "border": "#E7E5E4"
+  },
+  "typography": {
+    "primary_font": "Cormorant Garamond",
+    "secondary_font": "Outfit",
+    "heading_strategy": "Editorial Serifs for large numbers (Revenue at risk) and page titles to build trust and convey 'premium banking' feel.",
+    "body_strategy": "Clean, crisp sans-serif for dense data tables, charts, and secondary text.",
+    "scales": {
+      "h1_hero_number": "text-5xl sm:text-6xl font-serif tracking-tighter text-stone-900",
+      "h2": "text-3xl font-serif tracking-tight text-stone-900",
+      "h3": "text-xl font-serif tracking-tight text-stone-900",
+      "body": "text-base font-sans text-stone-600",
+      "small_label": "text-xs font-sans uppercase tracking-[0.2em] text-stone-500"
+    }
+  },
+  "spacing_and_layout": {
+    "strategy": "Mode B: The 'Control Room' Grid. Dense but breathable. High reliance on 1px borders for structure rather than heavy shadows.",
+    "container_padding": "p-6 sm:p-8",
+    "grid_gap": "gap-6",
+    "card_style": "Flat background (bg-white), 1px solid border (border-stone-200), minimal shadow (shadow-sm), slight rounding (rounded-md).",
+    "alignment": "Left-align data and typography. Numbers should use tabular nums."
+  },
+  "components": {
+    "dashboard_grid": "CSS Grid (grid-cols-1 md:grid-cols-3 lg:grid-cols-4). Top row for hero metrics (Revenue at Risk). Bottom rows for tables (Proposals, Invoices).",
+    "status_pills": "Use the status colors defined above. Small text (text-xs), rounded-full, 1px border. MUST have contrasting text.",
+    "buttons": "Primary actions use the accent Saffron/Ochre. font-sans, sharp corners (rounded-md), solid background. Hover: slight darkening.",
+    "tables": "Shadcn UI table heavily customized. NO vertical borders, subtle 1px horizontal borders (border-stone-100). Padding p-3 per cell. text-sm.",
+    "draft_modal": "Shadcn UI Dialog. Side-by-side view for WhatsApp vs Email. Use 'warm/playful' microcopy.",
+    "testing_attributes": "All interactive elements MUST include data-testid (e.g., data-testid='proposal-status-pill', data-testid='revenue-hero-number')."
+  },
+  "micro_interactions": {
+    "hover": "Subtle translation (-translate-y-[1px]) and shadow-md increase on rows or cards.",
+    "numbers": "Count-up animation for the Revenue at Risk hero number.",
+    "status_change": "Smooth color fade when status changes from Active to Cold."
+  },
+  "media": {
+    "avatar_placeholder": "https://images.unsplash.com/photo-1589386417686-0d34b5903d23",
+    "auth_background": "https://images.pexels.com/photos/33929082/pexels-photo-33929082.jpeg"
+  },
+  "specific_instructions_for_main_agent": [
+    "Install and use 'lucide-react' for icons. Use icons sparingly, focus on typography.",
+    "Format ALL currency using Indian numbering system (e.g., ₹ 1,50,000) using Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).",
+    "The Hero 'Revenue at Risk' MUST use the Cormorant Garamond font and be massive.",
+    "Ensure 'Today's Action List' supports a simple 'mark done' interaction with strike-through styling.",
+    "Implement light theme as default. Use #FAF9F6 as the main background.",
+    "For the AI Draft Follow-up, include a toggle/tabs for 'WhatsApp' vs 'Email' drafts.",
+    "Remember to include data-testid on every interactive element."
+  ]
+}
