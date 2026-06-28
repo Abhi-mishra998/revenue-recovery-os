@@ -12,9 +12,22 @@ Active provider is chosen by:
 """
 from __future__ import annotations
 
+import json
+import logging
 import os
+import re
 import uuid
-from typing import Optional, Protocol, runtime_checkable
+from typing import Optional, Protocol, Type, TypeVar, runtime_checkable
+
+from pydantic import BaseModel, ValidationError
+
+logger = logging.getLogger(__name__)
+
+T = TypeVar("T", bound=BaseModel)
+
+
+class MalformedOutputError(RuntimeError):
+    """Raised when the model returns output that doesn't match the schema even after retry."""
 
 
 class NoApiKeyError(RuntimeError):
@@ -151,4 +164,64 @@ async def generate_text(
     return await get_provider(provider).generate_text(
         system=system, user=user, model=model,
         max_tokens=max_tokens, session_id=session_id,
+    )
+
+
+# ---------- Structured JSON output with validation + 1 retry ----------
+_FENCE_RE = re.compile(r"^```(?:json)?\s*([\s\S]+?)\s*```$", re.MULTILINE)
+_BRACE_RE = re.compile(r"\{[\s\S]*\}")
+
+
+def _extract_json(text: str) -> str:
+    """Strip ```json``` fences and prose; return the first JSON object found."""
+    s = (text or "").strip()
+    m = _FENCE_RE.search(s)
+    if m:
+        s = m.group(1).strip()
+    if s.startswith("{") and s.endswith("}"):
+        return s
+    m = _BRACE_RE.search(s)
+    if m:
+        return m.group(0)
+    return s  # let json.loads fail with a clear error
+
+
+async def generate_json(
+    *, system: str, user: str, schema: Type[T],
+    provider: Optional[str] = None, model: Optional[str] = None,
+    max_tokens: int = 1500, session_id: Optional[str] = None,
+) -> T:
+    """
+    Ask the model for a JSON object that validates against `schema`. One
+    corrective retry on malformed output, then raise MalformedOutputError.
+    Provider-agnostic — works without JSON-mode SDK support.
+    """
+    p = get_provider(provider)
+    last_err: Optional[Exception] = None
+    last_raw: str = ""
+
+    for attempt in (1, 2):
+        sys_msg = system
+        if attempt == 2:
+            sys_msg = system + (
+                "\n\nIMPORTANT: your previous response was not valid JSON for the schema. "
+                "Return ONLY a single JSON object with the required fields, "
+                "no prose, no code fences, no commentary."
+            )
+        raw = await p.generate_text(
+            system=sys_msg, user=user, model=model,
+            max_tokens=max_tokens, session_id=session_id,
+        )
+        last_raw = raw
+        try:
+            obj = json.loads(_extract_json(raw))
+            return schema.model_validate(obj)
+        except (json.JSONDecodeError, ValidationError) as e:
+            last_err = e
+            logger.warning("structured-output attempt %d failed (%s): %s",
+                           attempt, type(e).__name__, str(e)[:200])
+
+    raise MalformedOutputError(
+        f"Model returned invalid output after retry. Last error: {last_err!r}. "
+        f"Raw (truncated): {last_raw[:400]!r}"
     )
