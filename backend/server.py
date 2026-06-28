@@ -144,6 +144,32 @@ app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 
+# Global catch-all for anything we didn't think of. Logs the full traceback
+# server-side (with request_id) so ops can trace, returns a stable safe shape
+# to the client. Never leak internal paths/stack frames.
+async def _internal_error_handler(request: Request, exc: Exception):
+    from starlette.responses import JSONResponse
+
+    rid = request_id_ctx.get() or "unknown"
+    logging.getLogger(__name__).exception(
+        "unhandled_exception",
+        extra={"route": request.url.path, "method": request.method, "request_id": rid},
+    )
+    return JSONResponse(
+        status_code=500,
+        content={
+            "detail": {
+                "code": "internal_error",
+                "message": "Something went wrong on our end. Please try again.",
+                "request_id": rid,
+            }
+        },
+    )
+
+
+app.add_exception_handler(Exception, _internal_error_handler)
+
+
 # ---------- Helpers ----------
 def now_utc() -> datetime:
     return datetime.now(timezone.utc)
