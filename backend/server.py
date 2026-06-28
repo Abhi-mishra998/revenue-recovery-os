@@ -675,6 +675,36 @@ async def dashboard_summary(user: dict = Depends(get_current_user)):
     }
 
 
+# ---------- Admin: AI kill-switch ----------
+# ponytail: per-call DB lookup on a single tiny doc (~1ms). Cache in-process
+# if it shows up in profiles.
+async def ai_killswitch_enabled() -> bool:
+    doc = await db.settings.find_one({"id": "global"}, {"ai_killswitch": 1})
+    return bool(doc and doc.get("ai_killswitch"))
+
+
+class KillSwitchReq(BaseModel):
+    enabled: bool
+
+
+@api.get("/admin/killswitch")
+async def get_killswitch(admin: dict = Depends(require_admin)):
+    return {"ai_killswitch": await ai_killswitch_enabled()}
+
+
+@api.post("/admin/killswitch")
+async def set_killswitch(req: KillSwitchReq, admin: dict = Depends(require_admin)):
+    await db.settings.update_one(
+        {"id": "global"},
+        {"$set": {"ai_killswitch": req.enabled}, "$setOnInsert": {"id": "global"}},
+        upsert=True,
+    )
+    await append_audit(db, action="admin.killswitch.set",
+                       actor_id=admin["id"], actor_email=admin["email"],
+                       payload={"enabled": req.enabled})
+    return {"ai_killswitch": req.enabled}
+
+
 # ---------- Admin: audit log ----------
 @api.get("/admin/audit-log/verify")
 async def admin_audit_verify(limit: Optional[int] = None, admin: dict = Depends(require_admin)):
@@ -708,6 +738,8 @@ async def generate_followup_for_proposal(request: Request, proposal_id: str, use
     Generate TWO drafts (WhatsApp + Email) for a proposal using the configured LLM.
     Saves each draft to a FollowUp record. Never sends anything.
     """
+    if await ai_killswitch_enabled():
+        raise HTTPException(status_code=503, detail="AI generation is currently disabled by the administrator.")
     p = await db.proposals.find_one({"id": proposal_id, "owner_id": user["id"]})
     if not p:
         raise HTTPException(404, "Proposal not found")
