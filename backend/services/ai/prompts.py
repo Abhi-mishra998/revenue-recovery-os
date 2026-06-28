@@ -88,14 +88,41 @@ FOLLOWUP_V2 = PromptTemplate(
 )
 
 
+_FOLLOWUP_USER_V3 = (
+    "Context:\n{context}\n\n"
+    "Return a single JSON object with these fields:\n"
+    '  whatsapp_text: 3-5 line WhatsApp follow-up under 70 words, polite Indian English,\n'
+    "    no emojis, signed off with the sender's first name only, no 'Subject:' line.\n"
+    "  email_subject: a single line subject (no 'Re:' prefix).\n"
+    "  email_body: 2 short paragraphs (110-180 words total), signed off with the\n"
+    "    sender's name + 'Revora', no emojis, Indian English.\n"
+    "  confidence: a number between 0 and 1 — your honest self-assessment of how well\n"
+    "    these drafts fit the context. Low when the context is thin/contradictory;\n"
+    "    high when you reference specific facts from the context confidently.\n"
+    "Use ₹ for currency. Reference the proposal title or industry briefly so each\n"
+    "draft feels specific. Output the JSON object only — no prose, no fences."
+)
+
+
+FOLLOWUP_V3 = PromptTemplate(
+    id="proposal_followup",
+    version=3,
+    description="v2 anti-hallucination + asks for self-reported confidence.",
+    system=_FOLLOWUP_SYSTEM_V2,
+    user_template=_FOLLOWUP_USER_V3,
+    schema=FollowUpDraft,
+    output_format="json",
+)
+
+
 # Active template per id. Bump here when promoting a new version.
 ACTIVE: dict[str, PromptTemplate] = {
-    "proposal_followup": FOLLOWUP_V2,
+    "proposal_followup": FOLLOWUP_V3,
 }
 
 # All versions, addressable by ref ("proposal_followup@v1") — used by eval harness.
 ALL: dict[str, PromptTemplate] = {
-    t.ref: t for t in (FOLLOWUP_V1, FOLLOWUP_V2)
+    t.ref: t for t in (FOLLOWUP_V1, FOLLOWUP_V2, FOLLOWUP_V3)
 }
 
 

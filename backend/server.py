@@ -905,6 +905,14 @@ async def generate_followup_for_proposal(request: Request, proposal_id: str, use
     return {
         "whatsapp": {"id": wa_id, "text": result["whatsapp_text"]},
         "email": {"id": em_id, "subject": result["email_subject"], "body": result["email_body"]},
+        "meta": {
+            "generation_id": generation_id,
+            "prompt_ref": result.get("prompt_ref"),
+            "route_ref": result.get("route_ref"),
+            "confidence": result.get("confidence"),
+            "latency_ms": latency_ms,
+            "created_at": now_iso,
+        },
     }
 
 

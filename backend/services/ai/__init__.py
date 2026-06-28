@@ -92,8 +92,9 @@ async def generate_proposal_followup(
         "whatsapp_text": rehydrated.whatsapp_text,
         "email_subject": rehydrated.email_subject,
         "email_body":    rehydrated.email_body,
-        "prompt_ref": template.ref,
-        "route_ref": choice.ref,
+        "confidence":    draft.confidence,
+        "prompt_ref":    template.ref,
+        "route_ref":     choice.ref,
     }
 
 
