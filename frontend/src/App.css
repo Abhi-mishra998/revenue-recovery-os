@@ -1,34 +1,120 @@
-.App-logo {
-    height: 40vmin;
-    pointer-events: none;
+.revora-sidebar-link {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  padding: 0.55rem 0.85rem;
+  border-radius: 6px;
+  color: var(--text-muted);
+  font-size: 0.875rem;
+  font-weight: 500;
+  transition: background-color 140ms ease, color 140ms ease;
+}
+.revora-sidebar-link:hover { background: #F4F1EB; color: var(--text); }
+.revora-sidebar-link.active { background: #1C1917; color: #FAF9F6; }
+
+.revora-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
 }
 
-@media (prefers-reduced-motion: no-preference) {
-    .App-logo {
-        animation: App-logo-spin infinite 20s linear;
-    }
+.revora-stat-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.22em;
+  color: var(--text-muted);
 }
 
-.App-header {
-    background-color: #0f0f10;
-    min-height: 100vh;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    font-size: calc(10px + 2vmin);
-    color: white;
+.hero-rupee {
+  font-family: "Cormorant Garamond", serif;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  line-height: 1;
 }
 
-.App-link {
-    color: #61dafb;
+.divider-soft { border-color: var(--border-soft); }
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 2px 9px;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  border-radius: 999px;
+  border: 1px solid;
+  text-transform: capitalize;
+}
+.pill-active { background: var(--active-bg); color: var(--active-text); border-color: var(--active-border); }
+.pill-cold   { background: var(--cold-bg);   color: var(--cold-text);   border-color: var(--cold-border); }
+.pill-dead   { background: var(--dead-bg);   color: var(--dead-text);   border-color: var(--dead-border); }
+.pill-won    { background: var(--won-bg);    color: var(--won-text);    border-color: var(--won-border); }
+.pill-lost   { background: #FEE2E2; color: #991B1B; border-color: #FCA5A5; }
+.pill-paid   { background: #DCFCE7; color: #166534; border-color: #86EFAC; }
+.pill-due    { background: #FEF3C7; color: #92400E; border-color: #FCD34D; }
+.pill-overdue{ background: #FFEDD5; color: #9A3412; border-color: #FDBA74; }
+.pill-critical{ background: #FEE2E2; color: #991B1B; border-color: #FCA5A5; }
+
+.dot { width: 6px; height: 6px; border-radius: 999px; display:inline-block; }
+
+.cta-primary {
+  background: var(--accent);
+  color: #FAF9F6;
+  border-radius: 6px;
+  padding: 0.55rem 1rem;
+  font-weight: 500;
+  font-size: 0.875rem;
+  transition: background-color 140ms ease, transform 140ms ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+}
+.cta-primary:hover { background: var(--accent-hover); }
+.cta-primary:active { transform: translateY(1px); }
+
+.cta-ghost {
+  border: 1px solid var(--border);
+  background: white;
+  color: var(--text);
+  border-radius: 6px;
+  padding: 0.5rem 0.85rem;
+  font-weight: 500;
+  font-size: 0.875rem;
+  transition: background-color 140ms ease;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.cta-ghost:hover { background: #F4F1EB; }
+
+.draft-output {
+  background: #FBF8F2;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 1rem;
+  font-family: "Outfit", sans-serif;
+  font-size: 0.9rem;
+  line-height: 1.55;
+  color: var(--text);
+  white-space: pre-wrap;
+  min-height: 160px;
 }
 
-@keyframes App-logo-spin {
-    from {
-        transform: rotate(0deg);
-    }
-    to {
-        transform: rotate(360deg);
-    }
+.kbd {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 11px;
+  background: #F4F1EB;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 6px;
+  color: var(--text-muted);
+}
+
+.action-done {
+  opacity: 0.45;
+  text-decoration: line-through;
+  text-decoration-color: var(--text-muted);
 }

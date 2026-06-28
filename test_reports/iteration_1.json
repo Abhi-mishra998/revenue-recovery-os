@@ -1,0 +1,46 @@
+{
+  "summary": "End-to-end test of Revora — Revenue Recovery OS. Backend (14 pytest tests) and full frontend Playwright walkthrough all PASS. Login auto-filled credentials work, dashboard renders Indian-numbered compact INR (₹12.35 L hero, ₹9,15,000 recoverable, ₹5,35,000 outstanding), 7 ranked actions visible, AI WhatsApp + Email drafts (Claude Sonnet 4.5) generate cleanly with tone switching, mark-done strikes-through and reloads, all filters/dialogs/buttons work on Proposals/Invoices/Clients pages, mark-paid integration produces toast and refreshes status, client detail page loads with proposals/invoices/activity, logout clears token. No critical bugs.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "CORS middleware", "issue": "allow_origins falls back to '*' from env; OK because auth uses Bearer header (allow_credentials=False), but explicit origins list would be safer in prod"}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Proposals & Invoices new-* dialogs", "issues": ["React dev-time hydration warning: <span> cannot be a child of <option> — looks like Emergent visual-editor instrumentation injecting a wrapper span inside <option>. Cosmetic in dev only, but may surface as a hydration error in SSR or production. Consider using native <select> options without instrumentation OR migrating to shadcn Select to avoid the warning."]}
+    ],
+    "testid_spec_mismatch": [
+      {"spec": "hero-revenue-at-risk-value", "actual": "revenue-at-risk-value (wrapper is hero-revenue-at-risk)", "note": "Same for recoverable-value / outstanding-invoices-value. Functional; just docs/spec drift."}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_revora_api.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "(Optional) Align data-testid names with the spec: rename value-level testids to hero-revenue-at-risk-value / hero-recoverable-value / hero-outstanding-invoices-value, OR update the spec — currently wrapper is hero-* and inner value is *-value.",
+    "(Optional) Suppress / remove the dev instrumentation that injects <span> inside <option> in new-proposal-form and new-invoice-form to fix the React hydration warning."
+  ],
+  "critical_code_review_comments": [
+    "server.py is ~745 lines and mixes auth, CRUD, dashboard, AI, seed logic. Consider splitting into modules (routes/auth.py, routes/proposals.py, services/ai.py, services/seed.py) before next feature wave.",
+    "compute_proposal_status / compute_invoice_status use days resolution from now_utc which can flip statuses at UTC midnight (not IST). For an India-first product consider IST-aware day boundaries.",
+    "Indexes are good (email unique, owner_id composite) — no n+1 issues; list_proposals/list_invoices preload clients_map once.",
+    "_id is correctly projected out everywhere — no ObjectId leak.",
+    "Bcrypt hashes verified to start with $2b$, login works with seeded admin; seed_admin idempotently updates password if ADMIN_PASSWORD changes.",
+    "Frontend: no error/loading boundary visible on AI draft failure path — toast only; non-blocking.",
+    "All interactive elements have data-testid (verified across Dashboard, Proposals, Invoices, Clients, Layout)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_revora_api.py (new)"
+  ],
+  "success_rate": {"backend": "100% (14/14)", "frontend": "100% of critical flows"},
+  "test_credentials": "founder@bytehubble.com / ByteHubble@2025 (pre-seeded, pre-filled on login form). Seed produces 6 clients, 6 proposals (mix of active/cold/dead), 5 invoices (mix of due/overdue/critical/paid).",
+  "seed_data_creation": "Seed runs on startup via seed_admin -> seed_demo_for_user; idempotent (skips if user has existing clients).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend tests live at /app/backend/tests/test_revora_api.py — uses REACT_APP_BACKEND_URL, seeded admin creds. AI draft tests have 60s timeout each; total run ~17s. Frontend testids reference: hero values are *-value (e.g. revenue-at-risk-value), action rows action-row-{id}, draft buttons draft-btn-{id}, invoice buttons mark-paid-{id} / inv-draft-{id}, client cards client-card-{id}, detail page client-detail-{id}, nav items nav-dashboard/proposals/invoices/clients, logout-btn. After navigating to Invoices/Clients pages, wait for first row/card selector before querying child action buttons — they are populated async after data fetch.",
+  "rca of the issue": "No bugs to RCA. Initial Playwright failures (mark-paid=0, client_cards=0) were timing issues in the test script — table rows hadn't finished mounting after route change. Resolved by adding wait_for_selector on first-row/first-card before querying buttons."
+}
