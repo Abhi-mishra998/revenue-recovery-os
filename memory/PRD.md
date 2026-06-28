@@ -31,14 +31,19 @@ activity log.
 
 ## Implemented (2026-02-XX)
 - JWT email/password auth with bcrypt, /api/auth/login, /api/auth/me, /api/auth/register
-- Seed admin user founder@bytehubble.com + 6 demo clients, 6 proposals, 5 invoices, activities
+- Seed admin user founder@bytehubble.com + 12 demo clients, 15 proposals, 10 invoices, ~35 activities
 - Proposals CRUD + touch (mark followed-up) + auto status
 - Invoices CRUD + mark-paid + auto status (due/overdue/critical/paid)
 - Dashboard summary + ranked Today's Action List with urgency scoring
-- AI draft endpoint (Claude Sonnet 4.5): WhatsApp, Email, Invoice-reminder × 3 tones (gentle/firm/final)
+- AI draft endpoint (Claude Sonnet 4.5 via Emergent key): WhatsApp, Email, Invoice-reminder × 3 tones (gentle/firm/final)
 - Activity timeline per client (auto-logged on every action)
 - Beautiful editorial-fintech UI: cream paper bg + serif hero numbers + status pills + warm Indian-business voice
 - 14/14 backend pytest passing; 100% frontend critical flows passing
+
+## Architecture shims for Opus export (2026-02-XX, scope-locked)
+- `backend/services/ai.py` — provider-abstracted AI layer. `PROVIDERS` dict maps name → handler. Default `anthropic_emergent` (uses EMERGENT_LLM_KEY). Swap providers by adding entries — no other code changes needed.
+- `backend/services/seed.py` — extracted realistic ByteHubble seed (12 clients across verticals, 15 proposals, 10 invoices, varied activities). `reset_demo_data_for_owner()` + `seed_demo_for_owner()` are reusable.
+- `backend/scripts/reset_demo.py` — one-command wipe + reseed (or `--wipe-only`). Preserves the user account; touches only demo content for the target owner.
 
 ## P0 backlog (next)
 - Real ₹ recovered counter (when cold proposal moves to active/won)

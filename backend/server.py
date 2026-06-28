@@ -18,7 +18,8 @@ from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel, Field, EmailStr
 
-from emergentintegrations.llm.chat import LlmChat, UserMessage
+from services.ai import draft_followup
+from services.seed import seed_demo_for_owner
 
 # ---------- MongoDB ----------
 mongo_url = os.environ['MONGO_URL']
@@ -210,71 +211,26 @@ async def generate_draft(user: dict, payload: DraftReq) -> dict:
     if not clientdoc:
         raise HTTPException(status_code=404, detail="Reference not found")
 
-    sender_name = user.get("name", "Founder")
-    sender_company = user.get("company") or "ByteHubble"
-    client_name = clientdoc["name"]
-    client_company = clientdoc.get("company") or ""
-
     if proposal:
         days = days_since(proposal["last_contact_at"])
-        amount_str = fmt_inr(proposal["value"])
-        subject_ref = f'proposal "{proposal["title"]}" worth {amount_str}'
+        subject_ref = f'proposal "{proposal["title"]}" worth {fmt_inr(proposal["value"])}'
     elif invoice:
         days = days_since(invoice["due_date"])
-        amount_str = fmt_inr(invoice["amount"])
-        subject_ref = f'invoice #{invoice["invoice_number"]} for {amount_str} (due {days} days ago)'
+        subject_ref = f'invoice #{invoice["invoice_number"]} for {fmt_inr(invoice["amount"])} (due {days} days ago)'
     else:
         raise HTTPException(status_code=400, detail="Missing reference")
 
-    tone_map = {
-        "gentle": "Warm, polite, casual but professional. Indian business etiquette. Start friendly.",
-        "firm": "Direct and clear about the pending status. Still respectful but explicit about the need for an update.",
-        "final": "Polite but final-warning tone. Acknowledge the long silence. Ask for a clear yes/no or a date.",
-    }
-
-    if payload.kind == "whatsapp":
-        system_msg = (
-            "You are an Indian B2B follow-up writing assistant for a service agency. "
-            "Write a SHORT WhatsApp message (3 to 6 lines max, total under 80 words). "
-            "No subject line. Use natural Indian English (e.g., 'Hi {name}', 'Just checking in'). "
-            "Use ₹ for currency. Do not use emojis. Sign off with the sender's first name only. "
-            f"Tone: {tone_map[payload.tone]}"
-        )
-    elif payload.kind == "email":
-        system_msg = (
-            "You are an Indian B2B follow-up writing assistant for a service agency. "
-            "Write a concise professional email (110-180 words). "
-            "Format strictly as: \nSubject: <subject line>\n\n<email body>\n\n"
-            "Body should have a greeting, 2 short paragraphs and a sign-off with sender name + company. "
-            "Use ₹ for currency. No emojis. "
-            f"Tone: {tone_map[payload.tone]}"
-        )
-    else:
-        system_msg = (
-            "You are an Indian B2B accounts-receivable assistant. "
-            "Write a polite invoice payment reminder email (100-160 words). "
-            "Format strictly as: \nSubject: <subject line>\n\n<email body>\n\n"
-            "Reference the invoice number and amount in ₹. Mention how many days it is past due. "
-            "Offer to share invoice copy / answer questions. Sign off with sender name + company. No emojis. "
-            f"Tone: {tone_map[payload.tone]}"
-        )
-
-    user_prompt = (
-        f"Sender: {sender_name} from {sender_company}\n"
-        f"Recipient: {client_name}" + (f" at {client_company}" if client_company else "") + "\n"
-        f"Reference: {subject_ref}\n"
-        f"Days since last contact / since due: {days}\n"
-        f"Write the message now."
+    text = await draft_followup(
+        kind=payload.kind,
+        tone=payload.tone,
+        sender_name=user.get("name", "Founder"),
+        sender_company=user.get("company") or "ByteHubble",
+        recipient_name=clientdoc["name"],
+        recipient_company=clientdoc.get("company") or "",
+        subject_ref=subject_ref,
+        days=days,
     )
-
-    chat = LlmChat(
-        api_key=EMERGENT_LLM_KEY,
-        session_id=f"draft-{uuid.uuid4()}",
-        system_message=system_msg,
-    ).with_model("anthropic", "claude-sonnet-4-5-20250929")
-
-    text = await chat.send_message(UserMessage(text=user_prompt))
-    return {"kind": payload.kind, "tone": payload.tone, "text": (text or "").strip()}
+    return {"kind": payload.kind, "tone": payload.tone, "text": text}
 
 
 # ---------- Auth endpoints ----------
@@ -619,77 +575,7 @@ async def ai_draft(payload: DraftReq, user: dict = Depends(get_current_user)):
 
 # ---------- Seed demo data ----------
 async def seed_demo_for_user(user_id: str):
-    existing = await db.clients.count_documents({"owner_id": user_id})
-    if existing > 0:
-        return
-
-    def iso_days_ago(d: int) -> str:
-        return (now_utc() - timedelta(days=d)).isoformat()
-
-    def iso_days_ahead(d: int) -> str:
-        return (now_utc() + timedelta(days=d)).isoformat()
-
-    clients_data = [
-        {"name": "Priya Sharma", "company": "Nexora Retail", "email": "priya@nexora.in", "phone": "+91 98xxxxxx21"},
-        {"name": "Rohan Mehta", "company": "Trikon Labs", "email": "rohan@trikonlabs.com", "phone": "+91 98xxxxxx84"},
-        {"name": "Anjali Iyer", "company": "Sundari Studios", "email": "anjali@sundaristudios.in", "phone": "+91 99xxxxxx02"},
-        {"name": "Vikram Patel", "company": "Patel & Associates CA", "email": "vp@patelca.in", "phone": "+91 95xxxxxx55"},
-        {"name": "Kunal Desai", "company": "FinKart", "email": "kunal@finkart.io", "phone": "+91 96xxxxxx41"},
-        {"name": "Meera Krishnan", "company": "Bloom Wellness", "email": "meera@bloom.health", "phone": "+91 91xxxxxx08"},
-    ]
-    client_ids = []
-    for c in clients_data:
-        cid = str(uuid.uuid4())
-        await db.clients.insert_one({
-            **c, "id": cid, "owner_id": user_id, "notes": "",
-            "created_at": iso_days_ago(45),
-        })
-        client_ids.append(cid)
-
-    proposals_data = [
-        {"client_idx": 0, "title": "E-commerce platform rebuild", "value": 450000, "sent_days_ago": 18, "last_days_ago": 14},
-        {"client_idx": 1, "title": "ML inference pipeline (Phase 1)", "value": 285000, "sent_days_ago": 12, "last_days_ago": 10},
-        {"client_idx": 2, "title": "Brand identity + website", "value": 180000, "sent_days_ago": 16, "last_days_ago": 13},
-        {"client_idx": 4, "title": "FinKart mobile app v2", "value": 620000, "sent_days_ago": 5, "last_days_ago": 2},
-        {"client_idx": 5, "title": "Bloom CRM customization", "value": 145000, "sent_days_ago": 6, "last_days_ago": 4},
-        {"client_idx": 3, "title": "Internal tax-portal MVP", "value": 320000, "sent_days_ago": 40, "last_days_ago": 32},
-    ]
-    for p in proposals_data:
-        pid = str(uuid.uuid4())
-        cid = client_ids[p["client_idx"]]
-        await db.proposals.insert_one({
-            "id": pid, "owner_id": user_id, "client_id": cid,
-            "title": p["title"], "value": p["value"],
-            "sent_at": iso_days_ago(p["sent_days_ago"]),
-            "last_contact_at": iso_days_ago(p["last_days_ago"]),
-            "manual_status": None, "notes": "",
-            "created_at": iso_days_ago(p["sent_days_ago"]),
-        })
-        await db.activities.insert_one({
-            "id": str(uuid.uuid4()), "owner_id": user_id, "client_id": cid, "proposal_id": pid,
-            "kind": "email", "summary": f"Sent proposal: {p['title']}",
-            "created_at": iso_days_ago(p["sent_days_ago"]),
-        })
-
-    invoices_data = [
-        {"client_idx": 0, "invoice_number": "BH-2025-014", "amount": 225000, "issued_days_ago": 35, "due_days_ago": 5, "paid": False},
-        {"client_idx": 1, "invoice_number": "BH-2025-016", "amount": 142500, "issued_days_ago": 50, "due_days_ago": 20, "paid": False},
-        {"client_idx": 3, "invoice_number": "BH-2025-009", "amount": 95000, "issued_days_ago": 75, "due_days_ago": 45, "paid": False},
-        {"client_idx": 5, "invoice_number": "BH-2025-018", "amount": 72500, "issued_days_ago": 20, "due_days_ahead": 10, "paid": False},
-        {"client_idx": 4, "invoice_number": "BH-2025-011", "amount": 310000, "issued_days_ago": 40, "due_days_ago": 10, "paid": True},
-    ]
-    for inv in invoices_data:
-        cid = client_ids[inv["client_idx"]]
-        due = iso_days_ahead(inv["due_days_ahead"]) if "due_days_ahead" in inv else iso_days_ago(inv["due_days_ago"])
-        iid = str(uuid.uuid4())
-        await db.invoices.insert_one({
-            "id": iid, "owner_id": user_id, "client_id": cid,
-            "invoice_number": inv["invoice_number"], "amount": inv["amount"],
-            "issued_at": iso_days_ago(inv["issued_days_ago"]),
-            "due_date": due,
-            "paid_at": iso_days_ago(2) if inv["paid"] else None,
-            "notes": "", "created_at": iso_days_ago(inv["issued_days_ago"]),
-        })
+    await seed_demo_for_owner(db, user_id)
 
 
 async def seed_admin():
