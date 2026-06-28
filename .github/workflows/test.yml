@@ -12,6 +12,32 @@ on:
     branches: ["**"]
 
 jobs:
+  frontend:
+    name: frontend (build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    env:
+      # Build-time placeholder; CI doesn't hit a real backend.
+      REACT_APP_BACKEND_URL: http://127.0.0.1:8765
+      CI: "false"   # CRA treats CI=true as 'warnings are errors' — too strict
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: yarn
+          cache-dependency-path: frontend/yarn.lock
+      - name: Enable corepack + yarn classic
+        run: |
+          corepack enable
+          corepack prepare yarn@1.22.22 --activate
+      - name: Install deps
+        run: yarn install --frozen-lockfile --ignore-engines
+      - name: Build
+        run: yarn build
+
   lint:
     name: lint (ruff)
     runs-on: ubuntu-latest
