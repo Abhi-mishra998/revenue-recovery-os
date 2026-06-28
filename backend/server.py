@@ -61,6 +61,7 @@ from services.db.repos import (
 )
 from services.events import emit_event
 from services.memory import get_or_compute_client_memory, recompute_client_memory
+from services.obs import init_logging, init_sentry, request_id_ctx, user_id_ctx
 from services.seed import seed_demo_for_owner
 
 # ---------- MongoDB ----------
@@ -149,6 +150,9 @@ async def get_current_user(creds: Optional[HTTPAuthorizationCredentials] = Depen
         raise HTTPException(status_code=401, detail="Token revoked")
     user.pop("_id", None)
     user.pop("password_hash", None)
+    # Stamp user_id into the request context so subsequent log lines + the
+    # access-log middleware include it automatically.
+    user_id_ctx.set(user["id"])
     return user
 
 
@@ -1237,6 +1241,39 @@ async def add_security_headers(request: Request, call_next):
     return response
 
 
+@app.middleware("http")
+async def request_context_and_access_log(request: Request, call_next):
+    """Stamp every request with a unique id, propagate it through logs +
+    response header, and emit one structured access-log line at end."""
+    rid = request.headers.get("X-Request-ID") or str(uuid.uuid4())
+    rid_token = request_id_ctx.set(rid)
+    # user_id is set later by routes that have already auth'd; default is ''.
+    uid_token = user_id_ctx.set("")
+    t0 = time.perf_counter()
+    status = 500
+    try:
+        response = await call_next(request)
+        status = response.status_code
+        response.headers["X-Request-ID"] = rid
+        return response
+    finally:
+        latency_ms = int((time.perf_counter() - t0) * 1000)
+        # Skip health check + static — they're 100x noisier than they're worth.
+        path = request.url.path
+        if not (path == "/api/" or path == "/api"):
+            logger.info(
+                "request",
+                extra={
+                    "method": request.method,
+                    "route": path,
+                    "status": status,
+                    "latency_ms": latency_ms,
+                },
+            )
+        request_id_ctx.reset(rid_token)
+        user_id_ctx.reset(uid_token)
+
+
 _cors_origins = [
     o.strip() for o in os.environ.get("CORS_ORIGINS", "http://localhost:3000").split(",") if o.strip()
 ]
@@ -1246,9 +1283,13 @@ app.add_middleware(
     allow_credentials=False,
     allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type"],
+    expose_headers=["X-Request-ID"],
 )
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+# JSON-structured logging on stdout. init_logging() resets the root logger so
+# this overrides any uvicorn-installed basicConfig.
+init_logging()
+init_sentry()  # no-op if SENTRY_DSN unset or sentry-sdk missing
 logger = logging.getLogger(__name__)
 
 
