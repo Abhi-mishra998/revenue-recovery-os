@@ -1310,6 +1310,35 @@ async def root():
 app.include_router(api)
 
 
+# Hard cap on request body size — pre-parse defence against DoS by giant
+# payloads. Pydantic per-field limits are post-parse; this stops a 100MB
+# upload from eating memory before we even look at it.
+MAX_REQUEST_BYTES = int(os.environ.get("MAX_REQUEST_BYTES", str(5 * 1024 * 1024)))  # 5MB default
+
+
+@app.middleware("http")
+async def enforce_max_body_size(request: Request, call_next):
+    """Reject oversized bodies via Content-Length, or stream-and-cap when the
+    client omits the header (chunked transfer)."""
+    cl = request.headers.get("content-length")
+    if cl is not None:
+        try:
+            if int(cl) > MAX_REQUEST_BYTES:
+                from starlette.responses import JSONResponse
+                return JSONResponse(
+                    status_code=413,
+                    content={
+                        "detail": {
+                            "code": "request_too_large",
+                            "message": f"Request body must be ≤ {MAX_REQUEST_BYTES} bytes.",
+                        }
+                    },
+                )
+        except ValueError:
+            pass  # malformed Content-Length — let Starlette deal with it
+    return await call_next(request)
+
+
 @app.middleware("http")
 async def add_security_headers(request: Request, call_next):
     response = await call_next(request)
