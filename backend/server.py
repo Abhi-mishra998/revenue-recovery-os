@@ -6,6 +6,7 @@ load_dotenv(ROOT_DIR / '.env')
 
 import os
 import logging
+import time
 import uuid
 import bcrypt
 import httpx
@@ -490,6 +491,16 @@ async def get_proposal(proposal_id: str, user: dict = Depends(get_current_user))
     return serialize_proposal(p, clients_map)
 
 
+@api.get("/proposals/{proposal_id}/followups")
+async def list_proposal_followups(proposal_id: str, user: dict = Depends(get_current_user)):
+    """Generation history for a proposal — newest first, grouped by generation_id."""
+    await assert_owns("proposals", proposal_id, user)
+    rows = await db.followups.find(
+        {"owner_id": user["id"], "proposal_id": proposal_id}, {"_id": 0},
+    ).sort("created_at", -1).limit(100).to_list(100)
+    return rows
+
+
 @api.patch("/proposals/{proposal_id}")
 async def update_proposal(proposal_id: str, payload: ProposalUpdate, user: dict = Depends(get_current_user)):
     updates = {k: v for k, v in payload.model_dump().items() if v is not None}
@@ -748,17 +759,19 @@ async def generate_followup_for_proposal(request: Request, proposal_id: str, use
         raise HTTPException(404, "Client not found")
 
     days = max(0, days_since(p["last_contact_date"]))
+    context_snapshot = {
+        "sender_name": (user.get("name") or "Founder").split()[0],
+        "recipient_contact": c.get("contact_name") or "there",
+        "recipient_company": c.get("company_name") or "your company",
+        "industry": c.get("industry"),
+        "title": p["title"],
+        "value_inr": float(p["value_inr"]),
+        "days_silent": days,
+    }
 
+    t0 = time.perf_counter()
     try:
-        result = await generate_proposal_followup(
-            sender_name=(user.get("name") or "Founder").split()[0],
-            recipient_contact=c.get("contact_name") or "there",
-            recipient_company=c.get("company_name") or "your company",
-            industry=c.get("industry"),
-            title=p["title"],
-            value_inr=float(p["value_inr"]),
-            days_silent=days,
-        )
+        result = await generate_proposal_followup(**context_snapshot)
     except NoApiKeyError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except GuardrailViolation as e:
@@ -768,30 +781,37 @@ async def generate_followup_for_proposal(request: Request, proposal_id: str, use
     except Exception as e:
         logger.exception("AI generation failed")
         raise HTTPException(status_code=502, detail=f"AI generation failed: {e}")
+    latency_ms = int((time.perf_counter() - t0) * 1000)
 
     now_iso = now_utc().isoformat()
+    generation_id = str(uuid.uuid4())
     wa_id = str(uuid.uuid4())
     em_id = str(uuid.uuid4())
+    common = {
+        "owner_id": user["id"],
+        "proposal_id": proposal_id,
+        "client_id": p["client_id"],
+        "generation_id": generation_id,
+        "context": context_snapshot,
+        "prompt_ref": result.get("prompt_ref"),
+        "route_ref": result.get("route_ref"),
+        "confidence": result.get("confidence"),
+        "latency_ms": latency_ms,
+        "created_at": now_iso,
+    }
     await db.followups.insert_many([
-        {
-            "id": wa_id, "owner_id": user["id"],
-            "proposal_id": proposal_id, "invoice_id": None,
-            "channel": "whatsapp",
-            "draft_text": result["whatsapp_text"],
-            "created_at": now_iso,
-        },
-        {
-            "id": em_id, "owner_id": user["id"],
-            "proposal_id": proposal_id, "invoice_id": None,
-            "channel": "email",
-            "draft_text": (f"Subject: {result['email_subject']}\n\n{result['email_body']}").strip(),
-            "created_at": now_iso,
-        },
+        {**common, "id": wa_id, "channel": "whatsapp",
+         "draft_text": result["whatsapp_text"]},
+        {**common, "id": em_id, "channel": "email",
+         "draft_text": (f"Subject: {result['email_subject']}\n\n{result['email_body']}").strip()},
     ])
     await append_audit(db, action="ai.followup.generate",
                        actor_id=user["id"], actor_email=user["email"],
                        resource_type="proposal", resource_id=proposal_id,
-                       payload={"days_silent": days, "wa_followup_id": wa_id, "email_followup_id": em_id})
+                       payload={"days_silent": days, "generation_id": generation_id,
+                                "prompt_ref": result.get("prompt_ref"),
+                                "route_ref": result.get("route_ref"),
+                                "latency_ms": latency_ms})
 
     return {
         "whatsapp": {"id": wa_id, "text": result["whatsapp_text"]},
