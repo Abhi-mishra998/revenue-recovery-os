@@ -29,6 +29,8 @@ from services.audit import append_audit, load_signing_key, verify_chain, get_pub
 from services.events import emit_event
 from services.memory import recompute_client_memory, get_or_compute_client_memory
 from services.data import extract_proposal_features, predict_close_probability
+from services.db import is_postgres
+from services.db import pg as pgdb
 
 # ---------- MongoDB ----------
 mongo_url = os.environ['MONGO_URL']
@@ -1066,9 +1068,14 @@ async def on_startup():
     await migrate_legacy_fields()
     await load_signing_key(db)
     await seed_admin()
+    if is_postgres():
+        await pgdb.init_pool()
+        logger.info("DB_ENGINE=postgres — asyncpg pool ready.")
     logger.info("Revora ready (audit key fp=%s).", get_public_key_fp())
 
 
 @app.on_event("shutdown")
 async def on_shutdown():
     client.close()
+    if is_postgres():
+        await pgdb.close_pool()

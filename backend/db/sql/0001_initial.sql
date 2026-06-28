@@ -16,6 +16,9 @@
 -- RLS — per-user row-level security
 --   Every tenant-scoped table:
 --     ENABLE ROW LEVEL SECURITY
+--     FORCE  ROW LEVEL SECURITY   <- critical: without this, the table owner
+--                                     bypasses RLS, so the app role (which owns
+--                                     the schema in dev) would too.
 --     POLICY using owner_id = current_setting('app.current_user_id')::uuid
 --   The DAO layer wraps each request in BEGIN; SET LOCAL app.current_user_id;
 --   so a buggy WHERE clause physically cannot leak across tenants.
@@ -25,6 +28,25 @@
 
 CREATE EXTENSION IF NOT EXISTS vector;       -- pgvector for followups.embedding
 CREATE EXTENSION IF NOT EXISTS pgcrypto;     -- for gen_random_uuid() if we want server-side
+
+
+-- =========================================================================
+-- App role. The connecting user (POSTGRES_USER) is a superuser and bypasses
+-- RLS unconditionally — so the request transaction SETs LOCAL ROLE to this
+-- non-superuser, which IS subject to RLS. Admin paths (audit_log reads,
+-- migration script, chain verify) skip the SET ROLE and run as superuser.
+-- =========================================================================
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'revora_app') THEN
+    CREATE ROLE revora_app NOLOGIN;
+  END IF;
+END $$;
+GRANT USAGE ON SCHEMA public TO revora_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO revora_app;
+GRANT USAGE ON ALL SEQUENCES IN SCHEMA public TO revora_app;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public
+  GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO revora_app;
 
 
 -- =========================================================================
@@ -62,6 +84,7 @@ CREATE TABLE IF NOT EXISTS clients (
 CREATE INDEX IF NOT EXISTS clients_owner_company_idx ON clients (owner_id, company_name);
 
 ALTER TABLE clients ENABLE ROW LEVEL SECURITY;
+ALTER TABLE clients FORCE  ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS clients_owner ON clients;
 CREATE POLICY clients_owner ON clients
   USING      (owner_id = current_setting('app.current_user_id', true)::uuid)
@@ -90,6 +113,7 @@ CREATE INDEX IF NOT EXISTS proposals_owner_client_idx ON proposals (owner_id, cl
 CREATE INDEX IF NOT EXISTS proposals_owner_lcd_idx   ON proposals (owner_id, last_contact_date DESC);
 
 ALTER TABLE proposals ENABLE ROW LEVEL SECURITY;
+ALTER TABLE proposals FORCE  ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS proposals_owner ON proposals;
 CREATE POLICY proposals_owner ON proposals
   USING      (owner_id = current_setting('app.current_user_id', true)::uuid)
@@ -116,6 +140,7 @@ CREATE INDEX IF NOT EXISTS invoices_owner_client_idx ON invoices (owner_id, clie
 CREATE INDEX IF NOT EXISTS invoices_owner_due_idx    ON invoices (owner_id, due_date DESC);
 
 ALTER TABLE invoices ENABLE ROW LEVEL SECURITY;
+ALTER TABLE invoices FORCE  ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS invoices_owner ON invoices;
 CREATE POLICY invoices_owner ON invoices
   USING      (owner_id = current_setting('app.current_user_id', true)::uuid)
@@ -142,6 +167,7 @@ CREATE INDEX IF NOT EXISTS activities_owner_created_idx ON activities (owner_id,
 CREATE INDEX IF NOT EXISTS activities_owner_client_idx  ON activities (owner_id, client_id);
 
 ALTER TABLE activities ENABLE ROW LEVEL SECURITY;
+ALTER TABLE activities FORCE  ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS activities_owner ON activities;
 CREATE POLICY activities_owner ON activities
   USING      (owner_id = current_setting('app.current_user_id', true)::uuid)
@@ -176,6 +202,7 @@ CREATE INDEX IF NOT EXISTS followups_owner_generation_idx
 -- on an empty column is wasteful; build it once we start writing vectors.
 
 ALTER TABLE followups ENABLE ROW LEVEL SECURITY;
+ALTER TABLE followups FORCE  ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS followups_owner ON followups;
 CREATE POLICY followups_owner ON followups
   USING      (owner_id = current_setting('app.current_user_id', true)::uuid)
@@ -204,6 +231,7 @@ CREATE INDEX IF NOT EXISTS events_owner_type_created_idx
   ON events (owner_id, event_type, created_at DESC);
 
 ALTER TABLE events ENABLE ROW LEVEL SECURITY;
+ALTER TABLE events FORCE  ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS events_owner ON events;
 CREATE POLICY events_owner ON events
   USING      (owner_id = current_setting('app.current_user_id', true)::uuid)
@@ -228,6 +256,7 @@ CREATE TABLE IF NOT EXISTS client_memory (
 );
 
 ALTER TABLE client_memory ENABLE ROW LEVEL SECURITY;
+ALTER TABLE client_memory FORCE  ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS client_memory_owner ON client_memory;
 CREATE POLICY client_memory_owner ON client_memory
   USING      (owner_id = current_setting('app.current_user_id', true)::uuid)
