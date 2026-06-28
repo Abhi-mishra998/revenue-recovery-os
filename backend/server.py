@@ -20,6 +20,7 @@ from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel, EmailStr
 
 from services.seed import seed_demo_for_owner
+from services.ai import generate_proposal_followup, NoApiKeyError
 
 # ---------- MongoDB ----------
 mongo_url = os.environ['MONGO_URL']
@@ -563,6 +564,63 @@ async def dashboard_summary(user: dict = Depends(get_current_user)):
     }
 
 
+@api.post("/proposals/{proposal_id}/generate-followup")
+async def generate_followup_for_proposal(proposal_id: str, user: dict = Depends(get_current_user)):
+    """
+    Generate TWO drafts (WhatsApp + Email) for a proposal using the configured LLM.
+    Saves each draft to a FollowUp record. Never sends anything.
+    """
+    p = await db.proposals.find_one({"id": proposal_id, "owner_id": user["id"]})
+    if not p:
+        raise HTTPException(404, "Proposal not found")
+    c = await db.clients.find_one({"id": p["client_id"], "owner_id": user["id"]})
+    if not c:
+        raise HTTPException(404, "Client not found")
+
+    days = max(0, days_since(p["last_contact_date"]))
+
+    try:
+        result = await generate_proposal_followup(
+            sender_name=(user.get("name") or "Founder").split()[0],
+            recipient_contact=c.get("contact_name") or "there",
+            recipient_company=c.get("company_name") or "your company",
+            industry=c.get("industry"),
+            title=p["title"],
+            value_inr=float(p["value_inr"]),
+            days_silent=days,
+        )
+    except NoApiKeyError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.exception("AI generation failed")
+        raise HTTPException(status_code=502, detail=f"AI generation failed: {e}")
+
+    now_iso = now_utc().isoformat()
+    wa_id = str(uuid.uuid4())
+    em_id = str(uuid.uuid4())
+    await db.followups.insert_many([
+        {
+            "id": wa_id, "owner_id": user["id"],
+            "proposal_id": proposal_id, "invoice_id": None,
+            "channel": "whatsapp",
+            "draft_text": result["whatsapp_text"],
+            "created_at": now_iso,
+        },
+        {
+            "id": em_id, "owner_id": user["id"],
+            "proposal_id": proposal_id, "invoice_id": None,
+            "channel": "email",
+            "draft_text": (f"Subject: {result['email_subject']}\n\n{result['email_body']}").strip(),
+            "created_at": now_iso,
+        },
+    ])
+
+    return {
+        "whatsapp": {"id": wa_id, "text": result["whatsapp_text"]},
+        "email": {"id": em_id, "subject": result["email_subject"], "body": result["email_body"]},
+    }
+
+
 # ---------- One-time migration: rename legacy field names ----------
 async def migrate_legacy_fields():
     """
@@ -656,6 +714,7 @@ async def on_startup():
     await db.proposals.create_index([("owner_id", 1)])
     await db.invoices.create_index([("owner_id", 1)])
     await db.activities.create_index([("owner_id", 1), ("created_at", -1)])
+    await db.followups.create_index([("owner_id", 1), ("proposal_id", 1), ("created_at", -1)])
     await migrate_legacy_fields()
     await seed_admin()
     logger.info("Revora ready.")

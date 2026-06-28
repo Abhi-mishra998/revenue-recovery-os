@@ -1,36 +1,41 @@
 """
 Provider-abstracted AI layer.
 
-Why this exists
-----------------
-For the Emergent demo we use Claude Sonnet 4.5 via the Emergent Universal LLM key
-(`anthropic_emergent` provider). When this repo is exported and refactored on Opus,
-swapping to a direct Anthropic key, an OpenAI/Gemini provider, or a self-hosted
-model is a one-file change: register a new entry in `PROVIDERS`.
+The default for follow-up drafts is `gemini_emergent` (Gemini 2.5 Flash via the
+Emergent Universal LLM key) — low-cost, fast, good enough for short B2B drafts.
 
-The contract is intentionally narrow:
-
-    text = await generate_text(provider, model, system, user_prompt, session_id)
-
-Higher-level Revora drafting helpers compose business context (client name,
-proposal value, days silent, tone) into a prompt and call `generate_text`.
+Swapping providers (e.g. to a direct Gemini key from the user's settings, or to
+Anthropic) is a one-file change: register a new entry in `PROVIDERS`.
 """
 
 from __future__ import annotations
 
+import asyncio
 import os
+import re
 import uuid
 from typing import Callable, Awaitable, Dict, Optional
 
 from emergentintegrations.llm.chat import LlmChat, UserMessage
 
-# --- Provider registry -------------------------------------------------------
 
+# --- Provider registry -------------------------------------------------------
 ProviderFn = Callable[[str, str, str, str], Awaitable[str]]
 
 
+def _require_emergent_key() -> str:
+    key = os.environ.get("EMERGENT_LLM_KEY")
+    if not key:
+        raise NoApiKeyError("No AI API key configured. Please add an API key in settings.")
+    return key
+
+
+class NoApiKeyError(RuntimeError):
+    """Raised when the active provider has no API key configured."""
+
+
 async def _anthropic_via_emergent(model: str, system: str, user: str, session_id: str) -> str:
-    api_key = os.environ["EMERGENT_LLM_KEY"]
+    api_key = _require_emergent_key()
     chat = (
         LlmChat(api_key=api_key, session_id=session_id, system_message=system)
         .with_model("anthropic", model)
@@ -39,26 +44,31 @@ async def _anthropic_via_emergent(model: str, system: str, user: str, session_id
     return (text or "").strip()
 
 
-# When you export to Opus, add direct providers here, e.g.:
+async def _gemini_via_emergent(model: str, system: str, user: str, session_id: str) -> str:
+    api_key = _require_emergent_key()
+    chat = (
+        LlmChat(api_key=api_key, session_id=session_id, system_message=system)
+        .with_model("gemini", model)
+    )
+    text = await chat.send_message(UserMessage(text=user))
+    return (text or "").strip()
+
+
+# When user adds a direct Gemini/OpenAI key in settings, register here:
 #
-# async def _anthropic_direct(model, system, user, session_id):
-#     ...uses os.environ['ANTHROPIC_API_KEY']...
-#
-# async def _openai_direct(model, system, user, session_id):
-#     ...uses os.environ['OPENAI_API_KEY']...
+# async def _gemini_direct(model, system, user, session_id):
+#     ...uses os.environ['GEMINI_API_KEY']...
 
 PROVIDERS: Dict[str, ProviderFn] = {
     "anthropic_emergent": _anthropic_via_emergent,
+    "gemini_emergent": _gemini_via_emergent,
 }
 
-# --- Defaults (config from env, sensible fallbacks) --------------------------
-
-DEFAULT_PROVIDER = os.environ.get("AI_PROVIDER", "anthropic_emergent")
-DEFAULT_MODEL = os.environ.get("AI_MODEL", "claude-sonnet-4-5-20250929")
+DEFAULT_PROVIDER = os.environ.get("AI_PROVIDER", "gemini_emergent")
+DEFAULT_MODEL = os.environ.get("AI_MODEL", "gemini-2.5-flash")
 
 
 # --- Public API --------------------------------------------------------------
-
 async def generate_text(
     system: str,
     user: str,
@@ -67,7 +77,6 @@ async def generate_text(
     model: Optional[str] = None,
     session_id: Optional[str] = None,
 ) -> str:
-    """One-shot text completion. Provider-agnostic."""
     provider = provider or DEFAULT_PROVIDER
     model = model or DEFAULT_MODEL
     session_id = session_id or f"revora-{uuid.uuid4()}"
@@ -76,72 +85,108 @@ async def generate_text(
     return await PROVIDERS[provider](model, system, user, session_id)
 
 
-# --- Revora-specific drafting --------------------------------------------------
+# --- Proposal follow-up generator (dual output) -----------------------------
+def _format_inr(n: float) -> str:
+    digits = str(int(round(n)))
+    if len(digits) <= 3:
+        return "₹" + digits
+    last3 = digits[-3:]
+    rest = digits[:-3]
+    groups = []
+    while len(rest) > 2:
+        groups.insert(0, rest[-2:])
+        rest = rest[:-2]
+    if rest:
+        groups.insert(0, rest)
+    return "₹" + ",".join(groups) + "," + last3
 
-TONE_GUIDE = {
-    "gentle": "Warm, polite, casual but professional. Indian business etiquette. Start friendly.",
-    "firm": "Direct and clear about the pending status. Still respectful but explicit about the need for an update.",
-    "final": "Polite but final-warning tone. Acknowledge the long silence. Ask for a clear yes/no or a date.",
-}
 
-
-def _system_prompt(kind: str, tone: str) -> str:
-    tone_line = TONE_GUIDE.get(tone, TONE_GUIDE["gentle"])
-    if kind == "whatsapp":
-        return (
-            "You are an Indian B2B follow-up writing assistant for a service agency. "
-            "Write a SHORT WhatsApp message (3 to 6 lines max, total under 80 words). "
-            "No subject line. Use natural Indian English (e.g., 'Hi {name}', 'Just checking in'). "
-            "Use ₹ for currency. Do not use emojis. Sign off with the sender's first name only. "
-            f"Tone: {tone_line}"
-        )
-    if kind == "email":
-        return (
-            "You are an Indian B2B follow-up writing assistant for a service agency. "
-            "Write a concise professional email (110-180 words). "
-            "Format strictly as:\nSubject: <subject line>\n\n<email body>\n\n"
-            "Body should have a greeting, 2 short paragraphs and a sign-off with sender name + company. "
-            "Use ₹ for currency. No emojis. "
-            f"Tone: {tone_line}"
-        )
-    # invoice_reminder
+def _build_context(
+    *, sender_name: str, recipient_contact: str, recipient_company: str,
+    industry: Optional[str], title: str, value_inr: float, days_silent: int,
+) -> str:
+    industry_str = f", a {industry} business" if industry else ""
     return (
-        "You are an Indian B2B accounts-receivable assistant. "
-        "Write a polite invoice payment reminder email (100-160 words). "
-        "Format strictly as:\nSubject: <subject line>\n\n<email body>\n\n"
-        "Reference the invoice number and amount in ₹. Mention how many days it is past due. "
-        "Offer to share invoice copy / answer questions. Sign off with sender name + company. No emojis. "
-        f"Tone: {tone_line}"
+        f"Sender: {sender_name} (founder of an Indian B2B service agency)\n"
+        f"Recipient: {recipient_contact} at {recipient_company}{industry_str}\n"
+        f"Proposal title: \"{title}\"\n"
+        f"Proposal value: {_format_inr(value_inr)}\n"
+        f"Days since last contact: {days_silent}\n"
     )
 
 
-async def draft_followup(
+WA_SYSTEM = (
+    "You write polite, warm WhatsApp follow-ups for an Indian B2B service agency. "
+    "Output a SHORT message of 3-5 lines, total under 70 words. "
+    "Use natural Indian English. Reference the proposal title or the client's industry briefly so it feels specific. "
+    "Use ₹ for currency. Do not use emojis. Sign off with the sender's first name only. "
+    "No 'Subject:' line. Output ONLY the message text, nothing else."
+)
+
+EMAIL_SYSTEM = (
+    "You write polite, slightly formal follow-up emails for an Indian B2B service agency. "
+    "Output the email in EXACTLY this format:\n"
+    "Subject: <single line subject>\n\n"
+    "<body — 2 short paragraphs, 110-180 words total, sign off with sender name + 'Revora'>\n\n"
+    "Use Indian English. Reference the proposal title and the client's industry where relevant. "
+    "Use ₹ for currency. Do not use emojis. Output ONLY the email, nothing else."
+)
+
+
+async def generate_proposal_followup(
     *,
-    kind: str,           # "whatsapp" | "email" | "invoice_reminder"
-    tone: str,           # "gentle" | "firm" | "final"
     sender_name: str,
-    sender_company: str,
-    recipient_name: str,
+    recipient_contact: str,
     recipient_company: str,
-    subject_ref: str,    # short description: 'proposal "X" worth ₹...' OR 'invoice #...'
-    days: int,
+    industry: Optional[str],
+    title: str,
+    value_inr: float,
+    days_silent: int,
     provider: Optional[str] = None,
     model: Optional[str] = None,
-) -> str:
-    system = _system_prompt(kind, tone)
-    user = (
-        f"Sender: {sender_name} from {sender_company}\n"
-        f"Recipient: {recipient_name}"
-        + (f" at {recipient_company}" if recipient_company else "")
-        + "\n"
-        f"Reference: {subject_ref}\n"
-        f"Days since last contact / since due: {days}\n"
-        f"Write the message now."
+) -> dict:
+    """
+    Returns:
+      {
+        "whatsapp_text": str,
+        "email_subject": str,
+        "email_body": str,
+      }
+    """
+    ctx = _build_context(
+        sender_name=sender_name,
+        recipient_contact=recipient_contact,
+        recipient_company=recipient_company,
+        industry=industry,
+        title=title,
+        value_inr=value_inr,
+        days_silent=days_silent,
     )
-    return await generate_text(
-        system=system,
-        user=user,
-        provider=provider,
-        model=model,
-        session_id=f"draft-{uuid.uuid4()}",
+
+    wa_task = generate_text(
+        system=WA_SYSTEM,
+        user=ctx + "\nWrite the WhatsApp message now.",
+        provider=provider, model=model,
+        session_id=f"wa-{uuid.uuid4()}",
     )
+    em_task = generate_text(
+        system=EMAIL_SYSTEM,
+        user=ctx + "\nWrite the email now.",
+        provider=provider, model=model,
+        session_id=f"em-{uuid.uuid4()}",
+    )
+    wa_text, em_text = await asyncio.gather(wa_task, em_task)
+
+    # Parse "Subject: ...\n\n<body>"
+    subject = ""
+    body = (em_text or "").strip()
+    m = re.match(r"^\s*Subject:\s*(.+?)\n\s*\n([\s\S]+)$", body, re.IGNORECASE)
+    if m:
+        subject = m.group(1).strip()
+        body = m.group(2).strip()
+
+    return {
+        "whatsapp_text": (wa_text or "").strip(),
+        "email_subject": subject,
+        "email_body": body,
+    }
