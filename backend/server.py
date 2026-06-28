@@ -311,6 +311,8 @@ async def register(request: Request, req: RegisterReq):
         "created_at": now_utc().isoformat(),
     }
     await db.users.insert_one(doc)
+    await append_audit(db, action="auth.register", actor_id=user_id, actor_email=email,
+                       resource_type="user", resource_id=user_id, payload={"name": req.name})
     token = create_access_token(user_id, email, 0)
     return {"token": token, "user": public_user(doc)}
 
@@ -361,6 +363,10 @@ async def google_session(request: Request, req: GoogleSessionReq):
             "created_at": now_utc().isoformat(),
         }
         await db.users.insert_one(user.copy())
+        await append_audit(db, action="auth.google_session.register",
+                           actor_id=user["id"], actor_email=email,
+                           resource_type="user", resource_id=user["id"],
+                           payload={"name": name})
     elif user.get("auth_provider") != "google":
         # Refuse silent account linking — a Google account for a password user's
         # email would otherwise take over that account.
@@ -379,6 +385,7 @@ async def me(user: dict = Depends(get_current_user)):
 async def logout(user: dict = Depends(get_current_user)):
     """Revoke every outstanding token for this user by bumping token_version."""
     await db.users.update_one({"id": user["id"]}, {"$inc": {"token_version": 1}})
+    await append_audit(db, action="auth.logout", actor_id=user["id"], actor_email=user["email"])
     return None
 
 
@@ -397,6 +404,8 @@ async def create_client(payload: ClientCreate, user: dict = Depends(get_current_
     doc["created_at"] = now_utc().isoformat()
     await db.clients.insert_one(doc.copy())
     doc.pop("_id", None)
+    await append_audit(db, action="client.create", actor_id=user["id"], actor_email=user["email"],
+                       resource_type="client", resource_id=doc["id"], payload=payload.model_dump())
     return doc
 
 
@@ -423,12 +432,17 @@ async def update_client(client_id: str, payload: ClientUpdate, user: dict = Depe
     if res.matched_count == 0:
         raise HTTPException(404, "Client not found")
     c = await db.clients.find_one({"id": client_id, "owner_id": user["id"]}, {"_id": 0})
+    await append_audit(db, action="client.update", actor_id=user["id"], actor_email=user["email"],
+                       resource_type="client", resource_id=client_id, payload=updates)
     return c
 
 
 @api.delete("/clients/{client_id}")
 async def delete_client(client_id: str, user: dict = Depends(get_current_user)):
-    await db.clients.delete_one({"id": client_id, "owner_id": user["id"]})
+    res = await db.clients.delete_one({"id": client_id, "owner_id": user["id"]})
+    if res.deleted_count:
+        await append_audit(db, action="client.delete", actor_id=user["id"], actor_email=user["email"],
+                           resource_type="client", resource_id=client_id)
     return {"ok": True}
 
 
@@ -453,6 +467,8 @@ async def create_proposal(payload: ProposalCreate, user: dict = Depends(get_curr
     doc["last_contact_date"] = doc.get("last_contact_date") or doc["sent_date"]
     doc["created_at"] = now_iso
     await db.proposals.insert_one(doc.copy())
+    await append_audit(db, action="proposal.create", actor_id=user["id"], actor_email=user["email"],
+                       resource_type="proposal", resource_id=doc["id"], payload=payload.model_dump())
     return serialize_proposal({k: v for k, v in doc.items() if k != "_id"})
 
 
@@ -474,12 +490,17 @@ async def update_proposal(proposal_id: str, payload: ProposalUpdate, user: dict 
     if res.matched_count == 0:
         raise HTTPException(404, "Proposal not found")
     p = await db.proposals.find_one({"id": proposal_id, "owner_id": user["id"]}, {"_id": 0})
+    await append_audit(db, action="proposal.update", actor_id=user["id"], actor_email=user["email"],
+                       resource_type="proposal", resource_id=proposal_id, payload=updates)
     return serialize_proposal(p)
 
 
 @api.delete("/proposals/{proposal_id}")
 async def delete_proposal(proposal_id: str, user: dict = Depends(get_current_user)):
-    await db.proposals.delete_one({"id": proposal_id, "owner_id": user["id"]})
+    res = await db.proposals.delete_one({"id": proposal_id, "owner_id": user["id"]})
+    if res.deleted_count:
+        await append_audit(db, action="proposal.delete", actor_id=user["id"], actor_email=user["email"],
+                           resource_type="proposal", resource_id=proposal_id)
     return {"ok": True}
 
 
@@ -503,6 +524,8 @@ async def create_invoice(payload: InvoiceCreate, user: dict = Depends(get_curren
     doc["issued_at"] = now_iso
     doc["created_at"] = now_iso
     await db.invoices.insert_one(doc.copy())
+    await append_audit(db, action="invoice.create", actor_id=user["id"], actor_email=user["email"],
+                       resource_type="invoice", resource_id=doc["id"], payload=payload.model_dump())
     return serialize_invoice({k: v for k, v in doc.items() if k != "_id"})
 
 
@@ -523,12 +546,17 @@ async def update_invoice(invoice_id: str, payload: InvoiceUpdate, user: dict = D
     if res.matched_count == 0:
         raise HTTPException(404, "Invoice not found")
     inv = await db.invoices.find_one({"id": invoice_id, "owner_id": user["id"]}, {"_id": 0})
+    await append_audit(db, action="invoice.update", actor_id=user["id"], actor_email=user["email"],
+                       resource_type="invoice", resource_id=invoice_id, payload=updates)
     return serialize_invoice(inv)
 
 
 @api.delete("/invoices/{invoice_id}")
 async def delete_invoice(invoice_id: str, user: dict = Depends(get_current_user)):
-    await db.invoices.delete_one({"id": invoice_id, "owner_id": user["id"]})
+    res = await db.invoices.delete_one({"id": invoice_id, "owner_id": user["id"]})
+    if res.deleted_count:
+        await append_audit(db, action="invoice.delete", actor_id=user["id"], actor_email=user["email"],
+                           resource_type="invoice", resource_id=invoice_id)
     return {"ok": True}
 
 
@@ -550,6 +578,8 @@ async def create_activity(payload: ActivityCreate, user: dict = Depends(get_curr
     doc["created_at"] = now_utc().isoformat()
     await db.activities.insert_one(doc.copy())
     doc.pop("_id", None)
+    await append_audit(db, action="activity.create", actor_id=user["id"], actor_email=user["email"],
+                       resource_type="activity", resource_id=doc["id"], payload=payload.model_dump())
     return doc
 
 
@@ -687,6 +717,10 @@ async def generate_followup_for_proposal(request: Request, proposal_id: str, use
             "created_at": now_iso,
         },
     ])
+    await append_audit(db, action="ai.followup.generate",
+                       actor_id=user["id"], actor_email=user["email"],
+                       resource_type="proposal", resource_id=proposal_id,
+                       payload={"days_silent": days, "wa_followup_id": wa_id, "email_followup_id": em_id})
 
     return {
         "whatsapp": {"id": wa_id, "text": result["whatsapp_text"]},
