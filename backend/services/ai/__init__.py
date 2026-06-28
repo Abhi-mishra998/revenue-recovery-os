@@ -13,7 +13,13 @@ from typing import Optional
 
 from . import prompts
 from . import redact as redact_mod
-from .client import MalformedOutputError, NoApiKeyError, generate_json, generate_text  # noqa: F401
+from .client import (  # noqa: F401
+    LLMProviderUnavailable,
+    MalformedOutputError,
+    NoApiKeyError,
+    generate_json,
+    generate_text,
+)
 from .guardrail import GuardrailViolation, enforce_followup  # noqa: F401
 from .router import RouteSignals, Tier, route  # noqa: F401
 from .schemas import FollowUpDraft

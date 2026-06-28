@@ -24,7 +24,7 @@ os.environ.setdefault("MONGO_URL", "mongodb://localhost:27017")
 os.environ.setdefault("DB_NAME", "revora_test")
 os.environ.setdefault("JWT_SECRET", "test-secret-do-not-use-in-prod")
 
-from services.ai import GuardrailViolation, generate_proposal_followup
+from services.ai import GuardrailViolation, LLMProviderUnavailable, generate_proposal_followup
 from services.ai.client import PROVIDERS
 
 
@@ -266,3 +266,61 @@ class TestGuardrailIntegration:
                     provider="__e2e_stub__",
                 )
             )
+
+
+# ---------- graceful degradation: provider retry + exhaustion ----------
+
+
+class _FlakyProvider:
+    """Provider that raises N times before returning success — exercises the
+    retry path in client.generate_text without hitting an actual LLM."""
+
+    name = "stub-flaky"
+    default_model = "stub"
+
+    def __init__(self, fail_times: int, then_response: str):
+        self.fail_times = fail_times
+        self.then_response = then_response
+        self.calls = 0
+
+    async def generate_text(self, *, system, user, model=None, max_tokens=1500, session_id=None):
+        self.calls += 1
+        if self.calls <= self.fail_times:
+            raise ConnectionError(f"simulated transport failure #{self.calls}")
+        return self.then_response
+
+
+class TestProviderRetry:
+    """Verify exponential-backoff retry hides transient provider failures."""
+
+    def test_recovers_after_two_transient_failures(self, monkeypatch, register_stub):
+        monkeypatch.setenv("LLM_MAX_ATTEMPTS", "3")
+        monkeypatch.setenv("LLM_RETRY_BASE_SECONDS", "0.01")
+        monkeypatch.setenv("LLM_RETRY_CAP_SECONDS", "0.02")
+        flaky = register_stub(_FlakyProvider(fail_times=2, then_response=_stub_payload()))
+        result = _run(
+            generate_proposal_followup(
+                sender_name="Rohan", recipient_contact="Priya",
+                recipient_company="FinKart", industry="Fintech",
+                title="KYC flows", value_inr=100000, days_silent=4,
+                provider="__e2e_stub__",
+            )
+        )
+        assert result["email_subject"] == VALID_DRAFT["email_subject"]
+        assert flaky.calls == 3, f"expected 3 calls (2 fails + 1 success), got {flaky.calls}"
+
+    def test_raises_llm_unavailable_after_all_attempts_fail(self, monkeypatch, register_stub):
+        monkeypatch.setenv("LLM_MAX_ATTEMPTS", "3")
+        monkeypatch.setenv("LLM_RETRY_BASE_SECONDS", "0.01")
+        monkeypatch.setenv("LLM_RETRY_CAP_SECONDS", "0.02")
+        flaky = register_stub(_FlakyProvider(fail_times=10, then_response=_stub_payload()))
+        with pytest.raises(LLMProviderUnavailable):
+            _run(
+                generate_proposal_followup(
+                    sender_name="Rohan", recipient_contact="Priya",
+                    recipient_company="FinKart", industry="Fintech",
+                    title="KYC flows", value_inr=100000, days_silent=4,
+                    provider="__e2e_stub__",
+                )
+            )
+        assert flaky.calls == 3, f"expected exactly LLM_MAX_ATTEMPTS calls, got {flaky.calls}"

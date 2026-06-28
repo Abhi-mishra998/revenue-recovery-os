@@ -13,9 +13,11 @@ Active provider is chosen by:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
+import random
 import re
 import uuid
 from typing import Optional, Protocol, Type, TypeVar, runtime_checkable
@@ -33,6 +35,11 @@ class MalformedOutputError(RuntimeError):
 
 class NoApiKeyError(RuntimeError):
     """Raised when the active provider has no API key configured."""
+
+
+class LLMProviderUnavailable(RuntimeError):
+    """Raised when the provider call fails after retries exhausted. Maps to
+    HTTP 503 at the API layer + a calm 'AI busy, try again' message on the UI."""
 
 
 @runtime_checkable
@@ -162,6 +169,56 @@ def get_provider(name: Optional[str] = None) -> LLMProvider:
     return PROVIDERS[name]
 
 
+# Retry config — read at call time so monkeypatched env in tests takes effect.
+def _max_attempts() -> int:
+    return int(os.environ.get("LLM_MAX_ATTEMPTS", "3"))
+
+
+def _retry_base_seconds() -> float:
+    return float(os.environ.get("LLM_RETRY_BASE_SECONDS", "0.5"))
+
+
+def _retry_cap_seconds() -> float:
+    return float(os.environ.get("LLM_RETRY_CAP_SECONDS", "8.0"))
+
+
+def _retry_delay(attempt: int) -> float:
+    """Exponential backoff with full jitter, capped. attempt is 1-indexed."""
+    expo = min(_retry_cap_seconds(), _retry_base_seconds() * (2 ** (attempt - 1)))
+    return random.uniform(0, expo)
+
+
+async def _call_with_retry(p: LLMProvider, **kw) -> str:
+    """Shared retry wrapper used by generate_text and generate_json.
+
+    Retries any provider error EXCEPT NoApiKeyError (permanent). After
+    _max_attempts() the underlying exception is converted to
+    LLMProviderUnavailable so the server can return a 503 with a calm
+    'AI busy' message instead of leaking the transport error.
+    """
+    max_attempts = _max_attempts()
+    last_exc: Optional[Exception] = None
+    for attempt in range(1, max_attempts + 1):
+        try:
+            return await p.generate_text(**kw)
+        except NoApiKeyError:
+            raise
+        except Exception as e:
+            last_exc = e
+            if attempt == max_attempts:
+                break
+            delay = _retry_delay(attempt)
+            logger.warning(
+                "LLM call failed (attempt %d/%d), retrying in %.2fs: %s",
+                attempt, max_attempts, delay, type(e).__name__,
+            )
+            await asyncio.sleep(delay)
+    raise LLMProviderUnavailable(
+        f"Provider {p.name} failed {max_attempts} attempts. "
+        f"Last error: {type(last_exc).__name__}: {last_exc}"
+    )
+
+
 async def generate_text(
     *,
     system: str,
@@ -171,13 +228,11 @@ async def generate_text(
     max_tokens: int = 1500,
     session_id: Optional[str] = None,
 ) -> str:
-    """Backwards-compatible top-level text generation."""
-    return await get_provider(provider).generate_text(
-        system=system,
-        user=user,
-        model=model,
-        max_tokens=max_tokens,
-        session_id=session_id,
+    """Top-level text generation with exponential-backoff retry."""
+    return await _call_with_retry(
+        get_provider(provider),
+        system=system, user=user, model=model,
+        max_tokens=max_tokens, session_id=session_id,
     )
 
 
@@ -227,7 +282,11 @@ async def generate_json(
                 "Return ONLY a single JSON object with the required fields, "
                 "no prose, no code fences, no commentary."
             )
-        raw = await p.generate_text(
+        # Use the retry wrapper so transport failures don't kill a JSON
+        # call after a single network blip. NoApiKeyError still propagates;
+        # LLMProviderUnavailable also propagates (no point trying again).
+        raw = await _call_with_retry(
+            p,
             system=sys_msg,
             user=user,
             model=model,

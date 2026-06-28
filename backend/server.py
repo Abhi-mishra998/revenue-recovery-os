@@ -25,7 +25,13 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 from starlette.middleware.cors import CORSMiddleware
 
-from services.ai import GuardrailViolation, MalformedOutputError, NoApiKeyError, generate_proposal_followup
+from services.ai import (
+    GuardrailViolation,
+    LLMProviderUnavailable,
+    MalformedOutputError,
+    NoApiKeyError,
+    generate_proposal_followup,
+)
 from services.audit import append_audit, get_public_key_fp, load_signing_key, verify_chain
 from services.data import extract_proposal_features, predict_close_probability
 from services.db import is_mongo, is_postgres
@@ -1076,6 +1082,17 @@ async def generate_followup_for_proposal(
         raise HTTPException(status_code=400, detail=str(e))
     except GuardrailViolation as e:
         raise HTTPException(status_code=422, detail=f"Draft failed safety checks: {e}. Please regenerate.")
+    except LLMProviderUnavailable as e:
+        # The frontend looks for code='llm_unavailable' to show the calm
+        # 'AI busy, try again' panel + Retry button. Keep the shape stable.
+        logger.warning("LLM provider unavailable: %s", e)
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "llm_unavailable",
+                "message": "AI provider is busy. Please try again in a minute.",
+            },
+        )
     except MalformedOutputError as e:
         raise HTTPException(status_code=502, detail=f"Model returned invalid output: {e}")
     except Exception as e:
