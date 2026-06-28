@@ -3,6 +3,10 @@ import ReactDOM from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import "@/index.css";
 import App from "@/App";
+import { initSentry } from "@/lib/sentry";
+
+// Fire-and-forget; noop unless REACT_APP_SENTRY_DSN is set.
+initSentry();
 
 const queryClient = new QueryClient({
   defaultOptions: {
