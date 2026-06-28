@@ -13,9 +13,8 @@ function formatErr(detail) {
 export default function Register() {
   const { register } = useAuth();
   const nav = useNavigate();
-  const [form, setForm] = useState({ name: "", email: "", company: "", password: "" });
+  const [form, setForm] = useState({ name: "", email: "", password: "" });
   const [loading, setLoading] = useState(false);
-
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
 
   const submit = async (e) => {
@@ -32,41 +31,45 @@ export default function Register() {
     }
   };
 
+  const googleLogin = () => {
+    // REMINDER: DO NOT HARDCODE THE URL, OR ADD ANY FALLBACKS OR REDIRECT URLS, THIS BREAKS THE AUTH
+    const redirectUrl = window.location.origin + "/";
+    window.location.href = `https://auth.emergentagent.com/?redirect=${encodeURIComponent(redirectUrl)}`;
+  };
+
   return (
-    <div className="min-h-screen grain-bg grid place-items-center p-6">
-      <form onSubmit={submit} className="w-full max-w-md revora-card p-8" data-testid="register-form">
+    <div className="min-h-screen bg-slate-50 grid place-items-center p-6">
+      <div className="w-full max-w-md revora-card p-8" data-testid="register-page">
         <div className="flex items-center gap-2 mb-6">
-          <div className="w-8 h-8 rounded-md bg-stone-900 text-amber-50 grid place-items-center font-serif-display text-xl">R</div>
-          <div className="font-serif-display text-2xl">Revora</div>
+          <div className="w-8 h-8 rounded-md bg-indigo-700 text-white grid place-items-center font-bold text-lg">R</div>
+          <div className="text-xl font-semibold">Revora</div>
         </div>
-        <h2 className="font-serif-display text-3xl mb-1">Create an account</h2>
-        <p className="text-sm text-stone-500 mb-6">Start recovering revenue you've already earned.</p>
+        <h2 className="text-3xl font-semibold mb-1 text-slate-900">Create account</h2>
+        <p className="text-sm text-slate-500 mb-6">Start recovering revenue you&apos;ve already earned.</p>
 
-        <label className="block mb-1 text-xs uppercase tracking-[0.18em] text-stone-500">Your name</label>
-        <input data-testid="register-name" value={form.name} onChange={set("name")} required
-          className="w-full border border-stone-200 bg-white rounded-md px-3 py-2.5 mb-3" />
+        <button onClick={googleLogin} className="cta-google" data-testid="google-register-btn">Continue with Google</button>
 
-        <label className="block mb-1 text-xs uppercase tracking-[0.18em] text-stone-500">Company</label>
-        <input data-testid="register-company" value={form.company} onChange={set("company")}
-          className="w-full border border-stone-200 bg-white rounded-md px-3 py-2.5 mb-3" />
+        <div className="my-5 flex items-center gap-3 text-xs text-slate-400">
+          <div className="flex-1 h-px bg-slate-200" /> OR <div className="flex-1 h-px bg-slate-200" />
+        </div>
 
-        <label className="block mb-1 text-xs uppercase tracking-[0.18em] text-stone-500">Email</label>
-        <input data-testid="register-email" type="email" value={form.email} onChange={set("email")} required
-          className="w-full border border-stone-200 bg-white rounded-md px-3 py-2.5 mb-3" />
+        <form onSubmit={submit} data-testid="register-form">
+          <label className="field-label">Your name</label>
+          <input data-testid="register-name" value={form.name} onChange={set("name")} required className="field mb-3" />
+          <label className="field-label">Email</label>
+          <input data-testid="register-email" type="email" value={form.email} onChange={set("email")} required className="field mb-3" />
+          <label className="field-label">Password</label>
+          <input data-testid="register-password" type="password" value={form.password} onChange={set("password")} required minLength={6} className="field mb-6" />
+          <button data-testid="register-submit" disabled={loading} className="cta-primary w-full justify-center">
+            {loading ? "Creating…" : "Create account"}
+          </button>
+        </form>
 
-        <label className="block mb-1 text-xs uppercase tracking-[0.18em] text-stone-500">Password</label>
-        <input data-testid="register-password" type="password" value={form.password} onChange={set("password")} required minLength={6}
-          className="w-full border border-stone-200 bg-white rounded-md px-3 py-2.5 mb-6" />
-
-        <button data-testid="register-submit" disabled={loading} className="cta-primary w-full justify-center disabled:opacity-60">
-          {loading ? "Creating…" : "Create account"}
-        </button>
-
-        <p className="text-xs text-stone-500 mt-6 text-center">
+        <p className="text-xs text-slate-500 mt-6 text-center">
           Already have an account?{" "}
-          <Link to="/login" className="text-amber-700 hover:text-amber-800 font-medium" data-testid="goto-login">Sign in</Link>
+          <Link to="/login" className="text-indigo-700 hover:text-indigo-800 font-medium" data-testid="goto-login">Sign in</Link>
         </p>
-      </form>
+      </div>
     </div>
   );
 }

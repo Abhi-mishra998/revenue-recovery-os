@@ -11,7 +11,6 @@ export function inr(n) {
   return formatter.format(Math.round(Number(n)));
 }
 
-// Compact: 1.25 L, 3.4 Cr — for hero numbers
 export function inrCompact(n) {
   if (n == null || isNaN(n)) return "₹0";
   const v = Number(n);
@@ -22,20 +21,16 @@ export function inrCompact(n) {
   return `₹${v.toFixed(0)}`;
 }
 
-export function daysAgoLabel(days) {
-  if (days <= 0) return "today";
-  if (days === 1) return "1 day ago";
-  if (days < 30) return `${days} days ago`;
-  const months = Math.floor(days / 30);
-  return months === 1 ? "1 month ago" : `${months} months ago`;
-}
-
-export function relativeDateISO(iso) {
+export function dateShort(iso) {
   if (!iso) return "—";
   try {
-    const d = new Date(iso);
-    return d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
-  } catch {
-    return "—";
-  }
+    return new Date(iso).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+  } catch { return "—"; }
+}
+
+export function dateForInput(iso) {
+  if (!iso) return "";
+  try {
+    return new Date(iso).toISOString().slice(0, 10);
+  } catch { return ""; }
 }

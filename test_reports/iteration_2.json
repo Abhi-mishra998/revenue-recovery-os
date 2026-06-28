@@ -1,0 +1,45 @@
+{
+  "summary": "Revora schema v2 (refactored). Backend pytest: 15/15 PASS — auth (login/register/me/google-bad-session), data isolation, dashboard summary returning exact seeded values (total_pipeline=37,75,000 / cold=6 / overdue=6 @ 11,57,500 / risk=27,15,000), clients CRUD (new schema company_name/contact_name/language), proposals CRUD with status compute (active≤7d / cold 8-21d / dead >21d), invoices CRUD with auto status (paid/unpaid/overdue + days_overdue). Frontend Playwright: login auto-fills founder@bytehubble.com, dashboard shows exactly 4 cards with correct ₹ Indian formatting (₹37.75 L hero, ₹11,57,500 overdue, ₹27.15 L risk), 14 proposals rows + edit/delete testids, proposal detail with edit/delete-proposal-detail, 12 client cards + client-detail with client-proposals/client-invoices sections, 10 invoice rows, all dialogs (proposal-form/client-form/invoice-form) open, mobile hamburger opens mobile-nav-panel drawer (test had to wait for welcome-toast to fade), logout returns to /login. No critical bugs.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "GET /api/clients/{id}", "issue": "Detail response no longer includes 'activities' field (out-of-scope per refactor) — verified intentional"},
+      {"endpoint": "POST /api/auth/google/session", "issue": "Returns 502 when Emergent upstream fails network call (test accepts 401/502); could be normalized to 401 for cleaner client error handling"}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Proposal/Client/Invoice dialogs", "issues": ["Same dev-only React hydration warning carried from iteration 1: <span> cannot be a child of <option>. Caused by Emergent visual-editor instrumentation wrapping dynamic <option> text in <span style='display:contents'>. Cosmetic in dev — does not break functionality, but throws to console. Pre-existing, non-blocking."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_revora_api.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "(Optional) Suppress the Emergent visual-editor <span>-in-<option> instrumentation for the three dialogs (Proposals/Clients/Invoices) — pre-existing dev-only React hydration warning, no functional impact.",
+    "(Optional) Consider mapping /api/auth/google/session upstream failure to 401 instead of 502 for consistent client UX on bad session_id."
+  ],
+  "critical_code_review_comments": [
+    "server.py is now ~628 lines (down from 745) but still mixes auth/CRUD/dashboard/migration in one file. Consider splitting into routes/auth.py, routes/clients.py, routes/proposals.py, routes/invoices.py before next prompt.",
+    "compute_proposal_status / compute_invoice_status use UTC day boundaries — India-first product may want IST for status flips at local midnight.",
+    "migrate_legacy_fields runs on every startup — idempotent and cheap (uses $exists guards) so OK, but for very large DBs consider one-shot migration.",
+    "_id correctly projected out of all responses (no ObjectId leak).",
+    "bcrypt hashes verified $2b$ format, seed_admin idempotently updates password if ADMIN_PASSWORD env changes, and auto-seeds demo data on first run.",
+    "Data isolation verified: a freshly-registered user sees [] for clients/proposals/invoices (owner_id filter on every query).",
+    "Pydantic Literal types correctly enforce stage ∈ {sent,negotiating,won,lost} and activity channel/direction enums.",
+    "All interactive UI elements have data-testid attributes per spec (proposal-row-{id}, edit-/delete-proposal-{id}, client-card-{id}, edit-/delete-client-{id}, invoice-row-{id}, edit-/delete-invoice-{id}, *-form, *-form-submit, nav-*, mobile-nav-open/panel/close, logout-btn / logout-btn-mobile)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_revora_api.py (rewritten for schema v2 — removed references to old fields name/value/invoice_number and removed-endpoints /touch /mark-paid /ai/draft /dashboard/today; added Google session, data isolation, status-compute, and exact dashboard value assertions)"
+  ],
+  "success_rate": {"backend": "100% (15/15)", "frontend": "100% of critical flows"},
+  "test_credentials": "founder@bytehubble.com / ByteHubble@2025 (pre-seeded, pre-filled on login form). Seed: 12 clients, 14 proposals (3 active + 6 cold + 2 dead + 2 won + 1 lost), 10 invoices (2 paid + 2 unpaid + 6 overdue).",
+  "seed_data_creation": "Ran /app/backend/scripts/reset_demo.py to wipe and reseed schema v2 demo data before tests (previous iteration had 6-client v1 seed). seed_demo_for_owner is idempotent at startup (skips if data exists).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend tests at /app/backend/tests/test_revora_api.py — requires REACT_APP_BACKEND_URL env. Run: REACT_APP_BACKEND_URL=https://revora-hub.preview.emergentagent.com pytest /app/backend/tests/ -o addopts='' --junitxml=/app/test_reports/pytest/pytest_results.xml. Schema v2 field names: Client.company_name/contact_name/language, Proposal.value_inr/sent_date/last_contact_date/stage, Invoice.invoice_no/amount_inr/due_date/paid_date. Status computed server-side, never typed. Dashboard summary expected values for default seed: total_pipeline_inr=3775000, cold_proposals_count=6, overdue_invoices_count=6, overdue_invoices_inr=1157500, revenue_at_risk_inr=2715000. When testing mobile drawer in Playwright, wait ~3.5s for the post-login Welcome toast to fade before clicking mobile-nav-open, or click with JS evaluate.",
+  "rca of the issue": "No bugs found. Initial Playwright failures on edit-/delete- selector counts were timing — rows hadn't mounted yet after route change; fixed with wait_for_selector on first proposal-row-/client-card-/invoice-row-. Initial mobile-nav-panel failure was the Welcome-back toast covering the hamburger button at the top-left; resolved by waiting for toast to fade."
+}

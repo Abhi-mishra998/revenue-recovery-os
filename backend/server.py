@@ -8,6 +8,7 @@ import os
 import logging
 import uuid
 import bcrypt
+import httpx
 import jwt
 from datetime import datetime, timezone, timedelta
 from typing import List, Optional, Literal
@@ -16,9 +17,8 @@ from fastapi import FastAPI, APIRouter, Depends, HTTPException
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
-from pydantic import BaseModel, Field, EmailStr
+from pydantic import BaseModel, EmailStr
 
-from services.ai import draft_followup
 from services.seed import seed_demo_for_owner
 
 # ---------- MongoDB ----------
@@ -28,13 +28,15 @@ db = client[os.environ['DB_NAME']]
 
 JWT_SECRET = os.environ['JWT_SECRET']
 JWT_ALG = "HS256"
-EMERGENT_LLM_KEY = os.environ['EMERGENT_LLM_KEY']
+
+EMERGENT_AUTH_SESSION_URL = "https://demobackend.emergentagent.com/auth/v1/env/oauth/session-data"
 
 app = FastAPI(title="Revora — Revenue Recovery OS")
 api = APIRouter(prefix="/api")
 bearer_scheme = HTTPBearer(auto_error=False)
 
 
+# ---------- Helpers ----------
 def now_utc() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -44,6 +46,8 @@ def hash_password(p: str) -> str:
 
 
 def verify_password(p: str, h: str) -> bool:
+    if not h:
+        return False
     try:
         return bcrypt.checkpw(p.encode("utf-8"), h.encode("utf-8"))
     except Exception:
@@ -77,10 +81,18 @@ async def get_current_user(creds: Optional[HTTPAuthorizationCredentials] = Depen
     return user
 
 
-def compute_proposal_status(last_contact_at: str, manual_status: Optional[str]) -> str:
-    if manual_status in ("dead", "won", "lost"):
-        return manual_status
-    last = datetime.fromisoformat(last_contact_at)
+def public_user(u: dict) -> dict:
+    return {
+        "id": u["id"],
+        "email": u["email"],
+        "name": u.get("name", ""),
+        "auth_provider": u.get("auth_provider", "email"),
+    }
+
+
+# ---------- Status compute (RULE: never typed by user) ----------
+def compute_proposal_status(last_contact_date: str) -> str:
+    last = datetime.fromisoformat(last_contact_date)
     if last.tzinfo is None:
         last = last.replace(tzinfo=timezone.utc)
     days = (now_utc() - last).days
@@ -91,18 +103,16 @@ def compute_proposal_status(last_contact_at: str, manual_status: Optional[str]) 
     return "dead"
 
 
-def compute_invoice_status(invoice: dict) -> str:
-    if invoice.get("paid_at"):
-        return "paid"
+def compute_invoice_status_and_overdue(invoice: dict) -> tuple[str, int]:
+    if invoice.get("paid_date"):
+        return "paid", 0
     due = datetime.fromisoformat(invoice["due_date"])
     if due.tzinfo is None:
         due = due.replace(tzinfo=timezone.utc)
     days_overdue = (now_utc() - due).days
-    if days_overdue <= 0:
-        return "due"
-    if days_overdue <= 14:
-        return "overdue"
-    return "critical"
+    if days_overdue > 0:
+        return "overdue", days_overdue
+    return "unpaid", 0
 
 
 def days_since(iso: str) -> int:
@@ -112,27 +122,11 @@ def days_since(iso: str) -> int:
     return (now_utc() - d).days
 
 
-def fmt_inr(n: float) -> str:
-    digits = str(int(round(n)))
-    if len(digits) <= 3:
-        return f"₹{digits}"
-    last3 = digits[-3:]
-    rest = digits[:-3]
-    groups = []
-    while len(rest) > 2:
-        groups.insert(0, rest[-2:])
-        rest = rest[:-2]
-    if rest:
-        groups.insert(0, rest)
-    return "₹" + ",".join(groups) + "," + last3
-
-
 # ---------- Models ----------
 class RegisterReq(BaseModel):
     email: EmailStr
     password: str
     name: str
-    company: Optional[str] = None
 
 
 class LoginReq(BaseModel):
@@ -140,97 +134,106 @@ class LoginReq(BaseModel):
     password: str
 
 
+class GoogleSessionReq(BaseModel):
+    session_id: str
+
+
 class ClientCreate(BaseModel):
-    name: str
-    company: Optional[str] = None
+    company_name: str
+    contact_name: str
     email: Optional[EmailStr] = None
     phone: Optional[str] = None
+    whatsapp: Optional[str] = None
+    industry: Optional[str] = None
+    language: str = "English"
     notes: Optional[str] = None
+
+
+class ClientUpdate(BaseModel):
+    company_name: Optional[str] = None
+    contact_name: Optional[str] = None
+    email: Optional[EmailStr] = None
+    phone: Optional[str] = None
+    whatsapp: Optional[str] = None
+    industry: Optional[str] = None
+    language: Optional[str] = None
+    notes: Optional[str] = None
+
+
+ProposalStage = Literal["sent", "negotiating", "won", "lost"]
 
 
 class ProposalCreate(BaseModel):
     client_id: str
     title: str
-    value: float
-    sent_at: Optional[str] = None
-    last_contact_at: Optional[str] = None
-    manual_status: Optional[Literal["active", "cold", "dead", "won", "lost"]] = None
+    value_inr: float
+    sent_date: Optional[str] = None
+    last_contact_date: Optional[str] = None
+    stage: ProposalStage = "sent"
     notes: Optional[str] = None
 
 
 class ProposalUpdate(BaseModel):
     title: Optional[str] = None
-    value: Optional[float] = None
-    last_contact_at: Optional[str] = None
-    manual_status: Optional[Literal["active", "cold", "dead", "won", "lost"]] = None
+    value_inr: Optional[float] = None
+    sent_date: Optional[str] = None
+    last_contact_date: Optional[str] = None
+    stage: Optional[ProposalStage] = None
     notes: Optional[str] = None
 
 
 class InvoiceCreate(BaseModel):
     client_id: str
-    invoice_number: str
-    amount: float
-    issued_at: Optional[str] = None
+    invoice_no: str
+    amount_inr: float
     due_date: str
+    paid_date: Optional[str] = None
     notes: Optional[str] = None
 
 
 class InvoiceUpdate(BaseModel):
-    amount: Optional[float] = None
+    invoice_no: Optional[str] = None
+    amount_inr: Optional[float] = None
     due_date: Optional[str] = None
-    paid_at: Optional[str] = None
+    paid_date: Optional[str] = None
     notes: Optional[str] = None
+
+
+ActivityChannel = Literal["call", "whatsapp", "email", "meeting", "note"]
+ActivityDirection = Literal["inbound", "outbound", "internal"]
 
 
 class ActivityCreate(BaseModel):
     client_id: str
-    proposal_id: Optional[str] = None
-    invoice_id: Optional[str] = None
-    kind: Literal["call", "whatsapp", "email", "meeting", "note", "draft_copied"]
+    related_type: Optional[Literal["proposal", "invoice"]] = None
+    related_id: Optional[str] = None
+    channel: ActivityChannel
+    direction: ActivityDirection = "outbound"
     summary: str
 
 
-class DraftReq(BaseModel):
-    kind: Literal["whatsapp", "email", "invoice_reminder"]
-    tone: Literal["gentle", "firm", "final"] = "gentle"
-    proposal_id: Optional[str] = None
-    invoice_id: Optional[str] = None
+# ---------- Serialization ----------
+def serialize_proposal(p: dict, clients_map: Optional[dict] = None) -> dict:
+    out = {k: v for k, v in p.items() if k != "_id"}
+    out["status"] = compute_proposal_status(p["last_contact_date"])
+    out["days_silent"] = days_since(p["last_contact_date"])
+    if clients_map is not None:
+        c = clients_map.get(p["client_id"], {})
+        out["client_company_name"] = c.get("company_name", "Unknown")
+        out["client_contact_name"] = c.get("contact_name", "")
+    return out
 
 
-# ---------- AI Draft ----------
-async def generate_draft(user: dict, payload: DraftReq) -> dict:
-    proposal = invoice = clientdoc = None
-    if payload.proposal_id:
-        proposal = await db.proposals.find_one({"id": payload.proposal_id, "owner_id": user["id"]})
-        if proposal:
-            clientdoc = await db.clients.find_one({"id": proposal["client_id"], "owner_id": user["id"]})
-    elif payload.invoice_id:
-        invoice = await db.invoices.find_one({"id": payload.invoice_id, "owner_id": user["id"]})
-        if invoice:
-            clientdoc = await db.clients.find_one({"id": invoice["client_id"], "owner_id": user["id"]})
-    if not clientdoc:
-        raise HTTPException(status_code=404, detail="Reference not found")
-
-    if proposal:
-        days = days_since(proposal["last_contact_at"])
-        subject_ref = f'proposal "{proposal["title"]}" worth {fmt_inr(proposal["value"])}'
-    elif invoice:
-        days = days_since(invoice["due_date"])
-        subject_ref = f'invoice #{invoice["invoice_number"]} for {fmt_inr(invoice["amount"])} (due {days} days ago)'
-    else:
-        raise HTTPException(status_code=400, detail="Missing reference")
-
-    text = await draft_followup(
-        kind=payload.kind,
-        tone=payload.tone,
-        sender_name=user.get("name", "Founder"),
-        sender_company=user.get("company") or "ByteHubble",
-        recipient_name=clientdoc["name"],
-        recipient_company=clientdoc.get("company") or "",
-        subject_ref=subject_ref,
-        days=days,
-    )
-    return {"kind": payload.kind, "tone": payload.tone, "text": text}
+def serialize_invoice(inv: dict, clients_map: Optional[dict] = None) -> dict:
+    out = {k: v for k, v in inv.items() if k != "_id"}
+    status, days_overdue = compute_invoice_status_and_overdue(inv)
+    out["status"] = status
+    out["days_overdue"] = days_overdue
+    if clients_map is not None:
+        c = clients_map.get(inv["client_id"], {})
+        out["client_company_name"] = c.get("company_name", "Unknown")
+        out["client_contact_name"] = c.get("contact_name", "")
+    return out
 
 
 # ---------- Auth endpoints ----------
@@ -245,34 +248,76 @@ async def register(req: RegisterReq):
         "id": user_id,
         "email": email,
         "name": req.name,
-        "company": req.company or "",
+        "auth_provider": "email",
         "password_hash": hash_password(req.password),
         "created_at": now_utc().isoformat(),
     }
     await db.users.insert_one(doc)
     token = create_access_token(user_id, email)
-    return {"token": token, "user": {"id": user_id, "email": email, "name": req.name, "company": req.company or ""}}
+    return {"token": token, "user": public_user(doc)}
 
 
 @api.post("/auth/login")
 async def login(req: LoginReq):
     email = req.email.lower()
     user = await db.users.find_one({"email": email})
-    if not user or not verify_password(req.password, user["password_hash"]):
+    if not user or not verify_password(req.password, user.get("password_hash", "")):
         raise HTTPException(status_code=401, detail="Invalid email or password")
     token = create_access_token(user["id"], email)
-    return {"token": token, "user": {"id": user["id"], "email": email, "name": user["name"], "company": user.get("company", "")}}
+    return {"token": token, "user": public_user(user)}
+
+
+@api.post("/auth/google/session")
+async def google_session(req: GoogleSessionReq):
+    """
+    Exchange an Emergent Google OAuth session_id (received in URL fragment on
+    redirect back) for a Revora JWT bearer token.
+
+    REMINDER: DO NOT HARDCODE THE URL, OR ADD ANY FALLBACKS OR REDIRECT URLS, THIS BREAKS THE AUTH
+    """
+    async with httpx.AsyncClient(timeout=10.0) as http:
+        try:
+            resp = await http.get(EMERGENT_AUTH_SESSION_URL, headers={"X-Session-ID": req.session_id})
+        except httpx.HTTPError as e:
+            raise HTTPException(status_code=502, detail=f"Auth upstream error: {e}")
+    if resp.status_code != 200:
+        raise HTTPException(status_code=401, detail="Invalid Google session")
+    info = resp.json()
+    email = (info.get("email") or "").lower()
+    name = info.get("name") or info.get("email") or "Google user"
+    if not email:
+        raise HTTPException(status_code=400, detail="Google session missing email")
+
+    user = await db.users.find_one({"email": email})
+    if user is None:
+        user_id = str(uuid.uuid4())
+        user = {
+            "id": user_id,
+            "email": email,
+            "name": name,
+            "auth_provider": "google",
+            "password_hash": None,
+            "created_at": now_utc().isoformat(),
+        }
+        await db.users.insert_one(user.copy())
+    else:
+        # Backfill auth_provider if missing
+        if not user.get("auth_provider"):
+            await db.users.update_one({"id": user["id"]}, {"$set": {"auth_provider": user.get("auth_provider", "google")}})
+
+    token = create_access_token(user["id"], email)
+    return {"token": token, "user": public_user(user)}
 
 
 @api.get("/auth/me")
 async def me(user: dict = Depends(get_current_user)):
-    return user
+    return public_user(user)
 
 
 # ---------- Clients ----------
 @api.get("/clients")
 async def list_clients(user: dict = Depends(get_current_user)):
-    rows = await db.clients.find({"owner_id": user["id"]}, {"_id": 0}).sort("name", 1).to_list(1000)
+    rows = await db.clients.find({"owner_id": user["id"]}, {"_id": 0}).sort("company_name", 1).to_list(2000)
     return rows
 
 
@@ -293,30 +338,38 @@ async def get_client(client_id: str, user: dict = Depends(get_current_user)):
     if not c:
         raise HTTPException(404, "Client not found")
     proposals = await db.proposals.find({"client_id": client_id, "owner_id": user["id"]}, {"_id": 0}).to_list(500)
-    for p in proposals:
-        p["status"] = compute_proposal_status(p["last_contact_at"], p.get("manual_status"))
-        p["days_silent"] = days_since(p["last_contact_at"])
     invoices = await db.invoices.find({"client_id": client_id, "owner_id": user["id"]}, {"_id": 0}).to_list(500)
-    for inv in invoices:
-        inv["status"] = compute_invoice_status(inv)
-        inv["days_overdue"] = max(0, days_since(inv["due_date"]))
-    activities = await db.activities.find({"client_id": client_id, "owner_id": user["id"]}, {"_id": 0}).sort("created_at", -1).to_list(500)
-    return {"client": c, "proposals": proposals, "invoices": invoices, "activities": activities}
+    return {
+        "client": c,
+        "proposals": [serialize_proposal(p) for p in proposals],
+        "invoices": [serialize_invoice(i) for i in invoices],
+    }
+
+
+@api.patch("/clients/{client_id}")
+async def update_client(client_id: str, payload: ClientUpdate, user: dict = Depends(get_current_user)):
+    updates = {k: v for k, v in payload.model_dump().items() if v is not None}
+    if not updates:
+        raise HTTPException(400, "Nothing to update")
+    res = await db.clients.update_one({"id": client_id, "owner_id": user["id"]}, {"$set": updates})
+    if res.matched_count == 0:
+        raise HTTPException(404, "Client not found")
+    c = await db.clients.find_one({"id": client_id}, {"_id": 0})
+    return c
+
+
+@api.delete("/clients/{client_id}")
+async def delete_client(client_id: str, user: dict = Depends(get_current_user)):
+    await db.clients.delete_one({"id": client_id, "owner_id": user["id"]})
+    return {"ok": True}
 
 
 # ---------- Proposals ----------
 @api.get("/proposals")
 async def list_proposals(user: dict = Depends(get_current_user)):
-    rows = await db.proposals.find({"owner_id": user["id"]}, {"_id": 0}).to_list(2000)
+    rows = await db.proposals.find({"owner_id": user["id"]}, {"_id": 0}).to_list(5000)
     clients_map = {c["id"]: c async for c in db.clients.find({"owner_id": user["id"]}, {"_id": 0})}
-    out = []
-    for r in rows:
-        r["status"] = compute_proposal_status(r["last_contact_at"], r.get("manual_status"))
-        r["days_silent"] = days_since(r["last_contact_at"])
-        c = clients_map.get(r["client_id"], {})
-        r["client_name"] = c.get("name", "Unknown")
-        r["client_company"] = c.get("company", "")
-        out.append(r)
+    out = [serialize_proposal(p, clients_map) for p in rows]
     out.sort(key=lambda x: x["days_silent"], reverse=True)
     return out
 
@@ -327,21 +380,20 @@ async def create_proposal(payload: ProposalCreate, user: dict = Depends(get_curr
     doc = payload.model_dump()
     doc["id"] = str(uuid.uuid4())
     doc["owner_id"] = user["id"]
-    doc["sent_at"] = doc.get("sent_at") or now_iso
-    doc["last_contact_at"] = doc.get("last_contact_at") or doc["sent_at"]
+    doc["sent_date"] = doc.get("sent_date") or now_iso
+    doc["last_contact_date"] = doc.get("last_contact_date") or doc["sent_date"]
     doc["created_at"] = now_iso
     await db.proposals.insert_one(doc.copy())
-    await db.activities.insert_one({
-        "id": str(uuid.uuid4()),
-        "owner_id": user["id"],
-        "client_id": doc["client_id"],
-        "proposal_id": doc["id"],
-        "kind": "note",
-        "summary": f"Proposal created: {doc['title']}",
-        "created_at": now_iso,
-    })
-    doc.pop("_id", None)
-    return doc
+    return serialize_proposal({k: v for k, v in doc.items() if k != "_id"})
+
+
+@api.get("/proposals/{proposal_id}")
+async def get_proposal(proposal_id: str, user: dict = Depends(get_current_user)):
+    p = await db.proposals.find_one({"id": proposal_id, "owner_id": user["id"]}, {"_id": 0})
+    if not p:
+        raise HTTPException(404, "Proposal not found")
+    clients_map = {p["client_id"]: await db.clients.find_one({"id": p["client_id"]}, {"_id": 0}) or {}}
+    return serialize_proposal(p, clients_map)
 
 
 @api.patch("/proposals/{proposal_id}")
@@ -353,29 +405,7 @@ async def update_proposal(proposal_id: str, payload: ProposalUpdate, user: dict 
     if res.matched_count == 0:
         raise HTTPException(404, "Proposal not found")
     p = await db.proposals.find_one({"id": proposal_id}, {"_id": 0})
-    return p
-
-
-@api.post("/proposals/{proposal_id}/touch")
-async def touch_proposal(proposal_id: str, user: dict = Depends(get_current_user)):
-    now_iso = now_utc().isoformat()
-    res = await db.proposals.update_one(
-        {"id": proposal_id, "owner_id": user["id"]},
-        {"$set": {"last_contact_at": now_iso}},
-    )
-    if res.matched_count == 0:
-        raise HTTPException(404, "Proposal not found")
-    p = await db.proposals.find_one({"id": proposal_id}, {"_id": 0})
-    await db.activities.insert_one({
-        "id": str(uuid.uuid4()),
-        "owner_id": user["id"],
-        "client_id": p["client_id"],
-        "proposal_id": proposal_id,
-        "kind": "note",
-        "summary": "Marked as followed-up today",
-        "created_at": now_iso,
-    })
-    return p
+    return serialize_proposal(p)
 
 
 @api.delete("/proposals/{proposal_id}")
@@ -387,16 +417,9 @@ async def delete_proposal(proposal_id: str, user: dict = Depends(get_current_use
 # ---------- Invoices ----------
 @api.get("/invoices")
 async def list_invoices(user: dict = Depends(get_current_user)):
-    rows = await db.invoices.find({"owner_id": user["id"]}, {"_id": 0}).to_list(2000)
+    rows = await db.invoices.find({"owner_id": user["id"]}, {"_id": 0}).to_list(5000)
     clients_map = {c["id"]: c async for c in db.clients.find({"owner_id": user["id"]}, {"_id": 0})}
-    out = []
-    for r in rows:
-        r["status"] = compute_invoice_status(r)
-        r["days_overdue"] = max(0, days_since(r["due_date"]))
-        c = clients_map.get(r["client_id"], {})
-        r["client_name"] = c.get("name", "Unknown")
-        r["client_company"] = c.get("company", "")
-        out.append(r)
+    out = [serialize_invoice(inv, clients_map) for inv in rows]
     out.sort(key=lambda x: x["days_overdue"], reverse=True)
     return out
 
@@ -407,21 +430,18 @@ async def create_invoice(payload: InvoiceCreate, user: dict = Depends(get_curren
     doc = payload.model_dump()
     doc["id"] = str(uuid.uuid4())
     doc["owner_id"] = user["id"]
-    doc["issued_at"] = doc.get("issued_at") or now_iso
-    doc["paid_at"] = None
+    doc["issued_at"] = now_iso
     doc["created_at"] = now_iso
     await db.invoices.insert_one(doc.copy())
-    await db.activities.insert_one({
-        "id": str(uuid.uuid4()),
-        "owner_id": user["id"],
-        "client_id": doc["client_id"],
-        "invoice_id": doc["id"],
-        "kind": "note",
-        "summary": f"Invoice #{doc['invoice_number']} raised",
-        "created_at": now_iso,
-    })
-    doc.pop("_id", None)
-    return doc
+    return serialize_invoice({k: v for k, v in doc.items() if k != "_id"})
+
+
+@api.get("/invoices/{invoice_id}")
+async def get_invoice(invoice_id: str, user: dict = Depends(get_current_user)):
+    inv = await db.invoices.find_one({"id": invoice_id, "owner_id": user["id"]}, {"_id": 0})
+    if not inv:
+        raise HTTPException(404, "Invoice not found")
+    return serialize_invoice(inv)
 
 
 @api.patch("/invoices/{invoice_id}")
@@ -433,29 +453,7 @@ async def update_invoice(invoice_id: str, payload: InvoiceUpdate, user: dict = D
     if res.matched_count == 0:
         raise HTTPException(404, "Invoice not found")
     inv = await db.invoices.find_one({"id": invoice_id}, {"_id": 0})
-    return inv
-
-
-@api.post("/invoices/{invoice_id}/mark-paid")
-async def mark_paid(invoice_id: str, user: dict = Depends(get_current_user)):
-    now_iso = now_utc().isoformat()
-    res = await db.invoices.update_one(
-        {"id": invoice_id, "owner_id": user["id"]},
-        {"$set": {"paid_at": now_iso}},
-    )
-    if res.matched_count == 0:
-        raise HTTPException(404, "Invoice not found")
-    inv = await db.invoices.find_one({"id": invoice_id}, {"_id": 0})
-    await db.activities.insert_one({
-        "id": str(uuid.uuid4()),
-        "owner_id": user["id"],
-        "client_id": inv["client_id"],
-        "invoice_id": invoice_id,
-        "kind": "note",
-        "summary": f"Invoice #{inv['invoice_number']} marked PAID ({fmt_inr(inv['amount'])})",
-        "created_at": now_iso,
-    })
-    return inv
+    return serialize_invoice(inv)
 
 
 @api.delete("/invoices/{invoice_id}")
@@ -467,7 +465,7 @@ async def delete_invoice(invoice_id: str, user: dict = Depends(get_current_user)
 # ---------- Activities ----------
 @api.get("/activities")
 async def list_activities(user: dict = Depends(get_current_user)):
-    rows = await db.activities.find({"owner_id": user["id"]}, {"_id": 0}).sort("created_at", -1).limit(50).to_list(50)
+    rows = await db.activities.find({"owner_id": user["id"]}, {"_id": 0}).sort("created_at", -1).limit(200).to_list(200)
     return rows
 
 
@@ -485,99 +483,94 @@ async def create_activity(payload: ActivityCreate, user: dict = Depends(get_curr
 # ---------- Dashboard ----------
 @api.get("/dashboard/summary")
 async def dashboard_summary(user: dict = Depends(get_current_user)):
-    proposals = await db.proposals.find({"owner_id": user["id"]}, {"_id": 0}).to_list(5000)
-    invoices = await db.invoices.find({"owner_id": user["id"]}, {"_id": 0}).to_list(5000)
+    proposals = await db.proposals.find({"owner_id": user["id"]}, {"_id": 0}).to_list(10000)
+    invoices = await db.invoices.find({"owner_id": user["id"]}, {"_id": 0}).to_list(10000)
 
-    p_buckets = {"active": 0.0, "cold": 0.0, "dead": 0.0, "won": 0.0, "lost": 0.0}
-    p_counts = {"active": 0, "cold": 0, "dead": 0, "won": 0, "lost": 0}
+    total_pipeline = 0.0
+    cold_count = 0
+    revenue_at_risk = 0.0
+    by_status = {"active": 0, "cold": 0, "dead": 0}
+    by_stage = {"sent": 0, "negotiating": 0, "won": 0, "lost": 0}
+
     for p in proposals:
-        s = compute_proposal_status(p["last_contact_at"], p.get("manual_status"))
-        if s in p_buckets:
-            p_buckets[s] += float(p["value"])
-            p_counts[s] += 1
-    pipeline_value = p_buckets["active"] + p_buckets["cold"]
-    recoverable = p_buckets["cold"]
-    at_risk = p_buckets["cold"] + p_buckets["dead"]
+        stage = p.get("stage", "sent")
+        by_stage[stage] = by_stage.get(stage, 0) + 1
+        if stage in ("sent", "negotiating"):
+            total_pipeline += float(p["value_inr"])
+            s = compute_proposal_status(p["last_contact_date"])
+            by_status[s] = by_status.get(s, 0) + 1
+            if s == "cold":
+                cold_count += 1
+                revenue_at_risk += float(p["value_inr"])
+            elif s == "dead":
+                revenue_at_risk += float(p["value_inr"])
 
-    inv_buckets = {"due": 0.0, "overdue": 0.0, "critical": 0.0, "paid": 0.0}
-    inv_counts = {"due": 0, "overdue": 0, "critical": 0, "paid": 0}
+    overdue_count = 0
+    overdue_amount = 0.0
     for inv in invoices:
-        s = compute_invoice_status(inv)
-        inv_buckets[s] += float(inv["amount"])
-        inv_counts[s] += 1
-    outstanding = inv_buckets["due"] + inv_buckets["overdue"] + inv_buckets["critical"]
-    collected = inv_buckets["paid"]
+        s, _ = compute_invoice_status_and_overdue(inv)
+        if s == "overdue":
+            overdue_count += 1
+            overdue_amount += float(inv["amount_inr"])
 
     return {
-        "revenue_at_risk": at_risk,
-        "recoverable": recoverable,
-        "pipeline_value": pipeline_value,
-        "outstanding_invoices": outstanding,
-        "collected": collected,
-        "proposal_buckets": p_buckets,
-        "proposal_counts": p_counts,
-        "invoice_buckets": inv_buckets,
-        "invoice_counts": inv_counts,
+        "total_pipeline_inr": total_pipeline,
+        "cold_proposals_count": cold_count,
+        "overdue_invoices_count": overdue_count,
+        "overdue_invoices_inr": overdue_amount,
+        "revenue_at_risk_inr": revenue_at_risk,
+        "by_status": by_status,
+        "by_stage": by_stage,
     }
 
 
-@api.get("/dashboard/today")
-async def todays_actions(user: dict = Depends(get_current_user)):
-    proposals = await db.proposals.find({"owner_id": user["id"]}, {"_id": 0}).to_list(5000)
-    invoices = await db.invoices.find({"owner_id": user["id"]}, {"_id": 0}).to_list(5000)
-    clients_map = {c["id"]: c async for c in db.clients.find({"owner_id": user["id"]}, {"_id": 0})}
+# ---------- One-time migration: rename legacy field names ----------
+async def migrate_legacy_fields():
+    """
+    Backward-compatible migration from the older internal field names to the
+    locked-in schema. Safe to run repeatedly — only renames where new field
+    is absent and old field exists.
+    """
+    # Clients: name -> contact_name, company -> company_name
+    await db.clients.update_many({"contact_name": {"$exists": False}, "name": {"$exists": True}}, {"$rename": {"name": "contact_name"}})
+    await db.clients.update_many({"company_name": {"$exists": False}, "company": {"$exists": True}}, {"$rename": {"company": "company_name"}})
+    await db.clients.update_many({"language": {"$exists": False}}, {"$set": {"language": "English"}})
 
-    actions = []
-    for p in proposals:
-        s = compute_proposal_status(p["last_contact_at"], p.get("manual_status"))
-        if s in ("cold", "dead"):
-            days = days_since(p["last_contact_at"])
-            c = clients_map.get(p["client_id"], {})
-            urgency = float(p["value"]) * (1 + min(days, 60) / 30)
-            actions.append({
-                "kind": "proposal",
-                "id": p["id"],
-                "client_id": p["client_id"],
-                "client_name": c.get("name", "Unknown"),
-                "client_company": c.get("company", ""),
-                "title": p["title"],
-                "value": p["value"],
-                "status": s,
-                "days": days,
-                "urgency": urgency,
-            })
-    for inv in invoices:
-        s = compute_invoice_status(inv)
-        if s in ("overdue", "critical"):
-            days = max(0, days_since(inv["due_date"]))
-            c = clients_map.get(inv["client_id"], {})
-            urgency = float(inv["amount"]) * (1 + min(days, 90) / 20)
-            actions.append({
-                "kind": "invoice",
-                "id": inv["id"],
-                "client_id": inv["client_id"],
-                "client_name": c.get("name", "Unknown"),
-                "client_company": c.get("company", ""),
-                "title": f"Invoice #{inv['invoice_number']}",
-                "value": inv["amount"],
-                "status": s,
-                "days": days,
-                "urgency": urgency,
-            })
-    actions.sort(key=lambda x: x["urgency"], reverse=True)
-    return actions[:20]
+    # Proposals: value -> value_inr, sent_at -> sent_date, last_contact_at -> last_contact_date
+    await db.proposals.update_many({"value_inr": {"$exists": False}, "value": {"$exists": True}}, {"$rename": {"value": "value_inr"}})
+    await db.proposals.update_many({"sent_date": {"$exists": False}, "sent_at": {"$exists": True}}, {"$rename": {"sent_at": "sent_date"}})
+    await db.proposals.update_many({"last_contact_date": {"$exists": False}, "last_contact_at": {"$exists": True}}, {"$rename": {"last_contact_at": "last_contact_date"}})
+    # manual_status -> stage (best-effort: won/lost/dead map to stage)
+    async for p in db.proposals.find({"stage": {"$exists": False}}):
+        ms = p.get("manual_status")
+        stage = "won" if ms == "won" else "lost" if ms == "lost" else "sent"
+        await db.proposals.update_one({"id": p["id"]}, {"$set": {"stage": stage}, "$unset": {"manual_status": ""}})
 
+    # Invoices: invoice_number -> invoice_no, amount -> amount_inr, paid_at -> paid_date
+    await db.invoices.update_many({"invoice_no": {"$exists": False}, "invoice_number": {"$exists": True}}, {"$rename": {"invoice_number": "invoice_no"}})
+    await db.invoices.update_many({"amount_inr": {"$exists": False}, "amount": {"$exists": True}}, {"$rename": {"amount": "amount_inr"}})
+    await db.invoices.update_many({"paid_date": {"$exists": False}, "paid_at": {"$exists": True}}, {"$rename": {"paid_at": "paid_date"}})
 
-@api.post("/ai/draft")
-async def ai_draft(payload: DraftReq, user: dict = Depends(get_current_user)):
-    return await generate_draft(user, payload)
+    # Activities: kind -> channel, proposal_id/invoice_id -> related_type/related_id
+    await db.activities.update_many({"channel": {"$exists": False}, "kind": {"$exists": True}}, {"$rename": {"kind": "channel"}})
+    async for a in db.activities.find({"related_type": {"$exists": False}}):
+        rt, rid = None, None
+        if a.get("proposal_id"):
+            rt, rid = "proposal", a["proposal_id"]
+        elif a.get("invoice_id"):
+            rt, rid = "invoice", a["invoice_id"]
+        update = {"$set": {"direction": a.get("direction", "outbound")}}
+        if rt:
+            update["$set"]["related_type"] = rt
+            update["$set"]["related_id"] = rid
+        update["$unset"] = {"proposal_id": "", "invoice_id": ""}
+        await db.activities.update_one({"id": a["id"]}, update)
+
+    # Users: auth_provider default
+    await db.users.update_many({"auth_provider": {"$exists": False}}, {"$set": {"auth_provider": "email"}})
 
 
-# ---------- Seed demo data ----------
-async def seed_demo_for_user(user_id: str):
-    await seed_demo_for_owner(db, user_id)
-
-
+# ---------- Seed admin (email/password) ----------
 async def seed_admin():
     admin_email = os.environ.get("ADMIN_EMAIL", "founder@bytehubble.com").lower()
     admin_password = os.environ.get("ADMIN_PASSWORD", "ByteHubble@2025")
@@ -587,15 +580,15 @@ async def seed_admin():
         await db.users.insert_one({
             "id": user_id, "email": admin_email,
             "name": "ByteHubble Founder",
-            "company": "ByteHubble",
+            "auth_provider": "email",
             "password_hash": hash_password(admin_password),
             "created_at": now_utc().isoformat(),
         })
-        await seed_demo_for_user(user_id)
+        await seed_demo_for_owner(db, user_id)
     else:
-        if not verify_password(admin_password, existing["password_hash"]):
+        if existing.get("auth_provider", "email") == "email" and not verify_password(admin_password, existing.get("password_hash", "")):
             await db.users.update_one({"email": admin_email}, {"$set": {"password_hash": hash_password(admin_password)}})
-        await seed_demo_for_user(existing["id"])
+        await seed_demo_for_owner(db, existing["id"])
 
 
 @api.get("/")
@@ -620,10 +613,11 @@ logger = logging.getLogger(__name__)
 @app.on_event("startup")
 async def on_startup():
     await db.users.create_index("email", unique=True)
-    await db.clients.create_index([("owner_id", 1), ("name", 1)])
+    await db.clients.create_index([("owner_id", 1), ("company_name", 1)])
     await db.proposals.create_index([("owner_id", 1)])
     await db.invoices.create_index([("owner_id", 1)])
     await db.activities.create_index([("owner_id", 1), ("created_at", -1)])
+    await migrate_legacy_fields()
     await seed_admin()
     logger.info("Revora ready.")
 
