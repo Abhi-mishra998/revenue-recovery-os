@@ -67,7 +67,7 @@ export default function Layout() {
         </aside>
 
         {/* Main */}
-        <main className="flex-1 min-w-0">
+        <main className="flex-1 min-w-0" data-page-enter>
           <Outlet />
         </main>
       </div>
@@ -90,7 +90,7 @@ function Brand({ small }) {
   return (
     <div className="flex items-center gap-2.5" data-testid="brand-logo">
       <div
-        className={`${small ? "w-7 h-7" : "w-8 h-8"} rounded-md grid place-items-center text-white`}
+        className={`${small ? "w-7 h-7" : "w-8 h-8"} rounded-md grid place-items-center text-white brand-mark-anim`}
         style={{ background: "var(--primary)", boxShadow: "var(--shadow-xs)" }}
       >
         <Command className={small ? "w-3.5 h-3.5" : "w-4 h-4"} strokeWidth={2.4} />

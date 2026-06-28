@@ -50,9 +50,11 @@ export default function Login() {
             backgroundSize: "32px 32px",
           }}
         />
+        {/* Ambient glow */}
+        <div className="ambient-glow" />
         <div className="relative">
           <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-md bg-white text-zinc-900 grid place-items-center">
+            <div className="w-9 h-9 rounded-md bg-white text-zinc-900 grid place-items-center brand-mark-anim">
               <Command className="w-4 h-4" strokeWidth={2.4} />
             </div>
             <div>

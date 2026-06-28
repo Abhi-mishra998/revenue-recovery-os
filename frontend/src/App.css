@@ -242,9 +242,105 @@ table tbody td { font-size: 13.5px; }
 
 /* -------- Subtle hover sheen on link cards -------- */
 .lift-on-hover {
-  transition: transform 120ms ease, border-color 120ms ease, box-shadow 120ms ease;
+  transition: transform 140ms cubic-bezier(0.22, 1, 0.36, 1), border-color 140ms ease, box-shadow 140ms ease;
 }
 .lift-on-hover:hover {
   border-color: var(--border-strong);
   box-shadow: var(--shadow-sm);
+  transform: translateY(-1px);
 }
+
+/* -------- Premium motion (Emergent / Linear-style) -------- */
+
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes brand-spark {
+  0%   { transform: scale(1) rotate(0deg);  filter: drop-shadow(0 0 0 rgba(91, 91, 214, 0)); }
+  35%  { transform: scale(1.08) rotate(-4deg); filter: drop-shadow(0 0 8px rgba(91, 91, 214, 0.35)); }
+  70%  { transform: scale(0.98) rotate(2deg); }
+  100% { transform: scale(1) rotate(0deg); filter: drop-shadow(0 0 0 rgba(91, 91, 214, 0)); }
+}
+@keyframes ambient-glow {
+  0%, 100% { opacity: 0.35; transform: translate(-50%, -50%) scale(1); }
+  50%      { opacity: 0.55; transform: translate(-50%, -50%) scale(1.08); }
+}
+@keyframes shimmer {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+@keyframes spin-slow {
+  to { transform: rotate(360deg); }
+}
+
+/* Page entrance — applied to <main> via [data-page-enter] */
+[data-page-enter] {
+  animation: fade-up 360ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* Stagger reveal — each .reveal child fades up with delay */
+.reveal { animation: fade-up 460ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+.reveal:nth-child(1) { animation-delay: 0ms; }
+.reveal:nth-child(2) { animation-delay: 60ms; }
+.reveal:nth-child(3) { animation-delay: 120ms; }
+.reveal:nth-child(4) { animation-delay: 180ms; }
+.reveal:nth-child(5) { animation-delay: 240ms; }
+.reveal:nth-child(6) { animation-delay: 300ms; }
+.reveal:nth-child(7) { animation-delay: 360ms; }
+.reveal:nth-child(8) { animation-delay: 420ms; }
+
+/* Brand mark on initial load */
+.brand-mark-anim {
+  animation: brand-spark 900ms cubic-bezier(0.34, 1.56, 0.64, 1) 120ms both;
+}
+
+/* Ambient glow blob for hero / login panel */
+.ambient-glow {
+  position: absolute;
+  top: 50%; left: 50%;
+  width: 420px; height: 420px;
+  border-radius: 999px;
+  background: radial-gradient(circle, rgba(91, 91, 214, 0.45) 0%, rgba(91, 91, 214, 0) 60%);
+  pointer-events: none;
+  animation: ambient-glow 6s ease-in-out infinite;
+  filter: blur(40px);
+}
+
+/* Shimmer skeleton for loading numbers */
+.skeleton {
+  position: relative;
+  background: var(--surface-2);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.skeleton::after {
+  content: "";
+  position: absolute; inset: 0;
+  background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.7) 50%, transparent 100%);
+  animation: shimmer 1.4s ease-in-out infinite;
+}
+
+/* Branded loader: spinning dotted ring */
+.revora-spinner {
+  width: 22px; height: 22px;
+  border: 2px solid var(--border);
+  border-top-color: var(--text);
+  border-radius: 999px;
+  animation: spin-slow 0.7s linear infinite;
+}
+
+/* Smoother button press */
+.cta-primary, .cta-ghost, .cta-accent, .cta-danger {
+  will-change: transform;
+}
+
+/* Reduce-motion users get no animations */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}
+

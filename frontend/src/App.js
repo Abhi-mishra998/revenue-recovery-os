@@ -18,8 +18,11 @@ function Protected({ children }) {
   const { user, loading } = useAuth();
   if (loading) {
     return (
-      <div className="min-h-screen grid place-items-center text-slate-500" data-testid="auth-loading">
-        Loading…
+      <div className="min-h-screen grid place-items-center" data-testid="auth-loading">
+        <div className="flex flex-col items-center gap-3 text-zinc-500">
+          <div className="revora-spinner" />
+          <div className="text-[12px] uppercase tracking-[0.16em]">Loading workspace</div>
+        </div>
       </div>
     );
   }

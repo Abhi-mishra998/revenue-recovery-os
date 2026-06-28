@@ -3,7 +3,8 @@ import { Link } from "react-router-dom";
 import { api } from "@/lib/api";
 import { inr, inrCompact } from "@/lib/format";
 import { StatusBadge } from "@/components/StatusPill";
-import { TrendingDown, Snowflake, AlertTriangle, Wallet, Sparkles, Activity, Skull, ArrowUpRight } from "lucide-react";
+import { useCountUp } from "@/lib/useCountUp";
+import { TrendingDown, AlertTriangle, Wallet, Sparkles, ArrowUpRight } from "lucide-react";
 
 export default function Dashboard() {
   const [summary, setSummary] = useState(null);
@@ -24,46 +25,50 @@ export default function Dashboard() {
 
       {/* Hero metrics */}
       <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-5 mt-6" data-testid="dashboard-cards">
-        <Card
-          label="Total Pipeline"
-          value={inrCompact(summary?.total_pipeline_inr)}
-          sub="Open proposals (excl. won/lost)"
-          icon={Wallet}
-          tint="indigo"
-          testId="card-pipeline"
-        />
-        <Card
-          label="Overdue Invoices"
-          value={inrCompact(summary?.overdue_invoices_inr)}
-          sub={summary ? `${summary.overdue_invoices_count} invoices past due` : "—"}
-          icon={AlertTriangle}
-          tint="red"
-          testId="card-overdue"
-        />
-        <Card
-          label="Revenue at Risk"
-          value={inrCompact(summary?.revenue_at_risk_inr)}
-          sub="Cold + Dead pipeline"
-          icon={TrendingDown}
-          tint="amber"
-          testId="card-risk"
-        />
-        <Card
-          label="Est. Recoverable"
-          value={inrCompact(summary?.estimated_recoverable_inr)}
-          sub={`Assumes ${summary?.recoverable_assumption_pct ?? 25}% of at-risk (rule-of-thumb)`}
-          icon={Sparkles}
-          tint="teal"
-          testId="card-recoverable"
-          accent="assumption"
-        />
+        <div className="reveal">
+          <Card
+            label="Total Pipeline"
+            target={summary?.total_pipeline_inr}
+            sub="Open proposals (excl. won/lost)"
+            icon={Wallet}
+            testId="card-pipeline"
+          />
+        </div>
+        <div className="reveal">
+          <Card
+            label="Overdue Invoices"
+            target={summary?.overdue_invoices_inr}
+            sub={summary ? `${summary.overdue_invoices_count} invoices past due` : "—"}
+            icon={AlertTriangle}
+            testId="card-overdue"
+          />
+        </div>
+        <div className="reveal">
+          <Card
+            label="Revenue at Risk"
+            target={summary?.revenue_at_risk_inr}
+            sub="Cold + Dead pipeline"
+            icon={TrendingDown}
+            testId="card-risk"
+          />
+        </div>
+        <div className="reveal">
+          <Card
+            label="Est. Recoverable"
+            target={summary?.estimated_recoverable_inr}
+            sub={`Assumes ${summary?.recoverable_assumption_pct ?? 25}% of at-risk (rule-of-thumb)`}
+            icon={Sparkles}
+            testId="card-recoverable"
+            accent="assumption"
+          />
+        </div>
       </section>
 
       {/* Pipeline split by auto status */}
       <section className="grid grid-cols-1 sm:grid-cols-3 gap-3 md:gap-4 mt-4" data-testid="dashboard-splits">
-        <SplitCard label="Active" value={summary?.active_inr} count={summary?.by_status?.active} status="active" testId="card-active" />
-        <SplitCard label="Cold" value={summary?.cold_inr} count={summary?.by_status?.cold} status="cold" testId="card-cold" />
-        <SplitCard label="Dead" value={summary?.dead_inr} count={summary?.by_status?.dead} status="dead" testId="card-dead" />
+        <div className="reveal"><SplitCard label="Active" value={summary?.active_inr} count={summary?.by_status?.active} status="active" testId="card-active" /></div>
+        <div className="reveal"><SplitCard label="Cold" value={summary?.cold_inr} count={summary?.by_status?.cold} status="cold" testId="card-cold" /></div>
+        <div className="reveal"><SplitCard label="Dead" value={summary?.dead_inr} count={summary?.by_status?.dead} status="dead" testId="card-dead" /></div>
       </section>
 
       {/* Donut + Top 5 list */}
@@ -135,7 +140,11 @@ export default function Dashboard() {
   );
 }
 
-function Card({ label, value, sub, icon: Icon, tint, testId, accent }) {
+function Card({ label, target, sub, icon: Icon, testId, accent }) {
+  const animated = useCountUp(target == null ? null : Number(target));
+  const display = animated == null
+    ? "—"
+    : inrCompact(animated);
   return (
     <div className="revora-card p-5 lift-on-hover" data-testid={testId}>
       <div className="flex items-start justify-between">
@@ -147,7 +156,7 @@ function Card({ label, value, sub, icon: Icon, tint, testId, accent }) {
         )}
       </div>
       <div className="mt-3 text-[28px] md:text-[30px] font-semibold text-zinc-900 tracking-tight tnum" data-testid={`${testId}-value`}>
-        {value}
+        {display}
       </div>
       <div className={`mt-1.5 text-[12px] ${accent === "assumption" ? "text-zinc-600 italic" : "text-zinc-500"}`} data-testid={`${testId}-sub`}>
         {sub}
@@ -156,7 +165,8 @@ function Card({ label, value, sub, icon: Icon, tint, testId, accent }) {
   );
 }
 
-function SplitCard({ label, value, count, status, icon: Icon, testId }) {
+function SplitCard({ label, value, count, status, testId }) {
+  const animated = useCountUp(value == null ? null : Number(value));
   return (
     <div className="revora-card p-5 lift-on-hover" data-testid={testId}>
       <div className="flex items-center justify-between">
@@ -164,7 +174,7 @@ function SplitCard({ label, value, count, status, icon: Icon, testId }) {
         <StatusBadge status={status} />
       </div>
       <div className="mt-3 text-[22px] font-semibold text-zinc-900 tracking-tight tnum" data-testid={`${testId}-value`}>
-        {inr(value)}
+        {animated == null ? "—" : inr(animated)}
       </div>
       <div className="text-[12px] text-zinc-500 mt-1">{count ?? 0} {count === 1 ? "proposal" : "proposals"}</div>
     </div>
