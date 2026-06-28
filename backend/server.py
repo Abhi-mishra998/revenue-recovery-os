@@ -17,7 +17,7 @@ from fastapi import FastAPI, APIRouter, Depends, HTTPException
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 
 from services.seed import seed_demo_for_owner
 from services.ai import generate_proposal_followup, NoApiKeyError
@@ -134,80 +134,92 @@ def days_since(iso: str) -> int:
 
 
 # ---------- Models ----------
+# Length caps are generous but bounded — keep one mongo doc < ~50 KB and stop
+# clients from posting megabyte payloads into notes/summary.
+NAME_LEN = 120
+TITLE_LEN = 300
+COMPANY_LEN = 200
+SHORT_LEN = 80
+PHONE_LEN = 30
+INVOICE_NO_LEN = 50
+NOTES_LEN = 4000
+MONEY_MAX = 1_000_000_000_000.0  # ₹1 trillion — well past any real proposal
+
+
 class RegisterReq(BaseModel):
     email: EmailStr
-    password: str
-    name: str
+    password: str = Field(..., min_length=8, max_length=128)
+    name: str = Field(..., min_length=1, max_length=NAME_LEN)
 
 
 class LoginReq(BaseModel):
     email: EmailStr
-    password: str
+    password: str = Field(..., min_length=1, max_length=128)
 
 
 class GoogleSessionReq(BaseModel):
-    session_id: str
+    session_id: str = Field(..., min_length=1, max_length=512)
 
 
 class ClientCreate(BaseModel):
-    company_name: str
-    contact_name: str
+    company_name: str = Field(..., min_length=1, max_length=COMPANY_LEN)
+    contact_name: str = Field(..., min_length=1, max_length=NAME_LEN)
     email: Optional[EmailStr] = None
-    phone: Optional[str] = None
-    whatsapp: Optional[str] = None
-    industry: Optional[str] = None
-    language: str = "English"
-    notes: Optional[str] = None
+    phone: Optional[str] = Field(None, max_length=PHONE_LEN)
+    whatsapp: Optional[str] = Field(None, max_length=PHONE_LEN)
+    industry: Optional[str] = Field(None, max_length=SHORT_LEN)
+    language: str = Field("English", min_length=1, max_length=SHORT_LEN)
+    notes: Optional[str] = Field(None, max_length=NOTES_LEN)
 
 
 class ClientUpdate(BaseModel):
-    company_name: Optional[str] = None
-    contact_name: Optional[str] = None
+    company_name: Optional[str] = Field(None, min_length=1, max_length=COMPANY_LEN)
+    contact_name: Optional[str] = Field(None, min_length=1, max_length=NAME_LEN)
     email: Optional[EmailStr] = None
-    phone: Optional[str] = None
-    whatsapp: Optional[str] = None
-    industry: Optional[str] = None
-    language: Optional[str] = None
-    notes: Optional[str] = None
+    phone: Optional[str] = Field(None, max_length=PHONE_LEN)
+    whatsapp: Optional[str] = Field(None, max_length=PHONE_LEN)
+    industry: Optional[str] = Field(None, max_length=SHORT_LEN)
+    language: Optional[str] = Field(None, min_length=1, max_length=SHORT_LEN)
+    notes: Optional[str] = Field(None, max_length=NOTES_LEN)
 
 
 ProposalStage = Literal["sent", "negotiating", "won", "lost"]
 
 
 class ProposalCreate(BaseModel):
-    client_id: str
-    title: str
-    value_inr: float
+    client_id: str = Field(..., min_length=1, max_length=64)
+    title: str = Field(..., min_length=1, max_length=TITLE_LEN)
+    value_inr: float = Field(..., gt=0, le=MONEY_MAX)
     sent_date: Optional[str] = None
     last_contact_date: Optional[str] = None
     stage: ProposalStage = "sent"
-    notes: Optional[str] = None
+    notes: Optional[str] = Field(None, max_length=NOTES_LEN)
 
 
 class ProposalUpdate(BaseModel):
-    title: Optional[str] = None
-    value_inr: Optional[float] = None
+    title: Optional[str] = Field(None, min_length=1, max_length=TITLE_LEN)
+    value_inr: Optional[float] = Field(None, gt=0, le=MONEY_MAX)
     sent_date: Optional[str] = None
     last_contact_date: Optional[str] = None
     stage: Optional[ProposalStage] = None
-    notes: Optional[str] = None
+    notes: Optional[str] = Field(None, max_length=NOTES_LEN)
 
 
 class InvoiceCreate(BaseModel):
-    client_id: str
-    invoice_no: str
-    amount_inr: float
+    client_id: str = Field(..., min_length=1, max_length=64)
+    invoice_no: str = Field(..., min_length=1, max_length=INVOICE_NO_LEN)
+    amount_inr: float = Field(..., gt=0, le=MONEY_MAX)
     due_date: str
     paid_date: Optional[str] = None
-    notes: Optional[str] = None
+    notes: Optional[str] = Field(None, max_length=NOTES_LEN)
 
 
 class InvoiceUpdate(BaseModel):
-    invoice_no: Optional[str] = None
-    amount_inr: Optional[float] = None
+    invoice_no: Optional[str] = Field(None, min_length=1, max_length=INVOICE_NO_LEN)
+    amount_inr: Optional[float] = Field(None, gt=0, le=MONEY_MAX)
     due_date: Optional[str] = None
     paid_date: Optional[str] = None
-    notes: Optional[str] = None
+    notes: Optional[str] = Field(None, max_length=NOTES_LEN)
 
 
 ActivityChannel = Literal["call", "whatsapp", "email", "meeting", "note"]
@@ -215,12 +227,12 @@ ActivityDirection = Literal["inbound", "outbound", "internal"]
 
 
 class ActivityCreate(BaseModel):
-    client_id: str
+    client_id: str = Field(..., min_length=1, max_length=64)
     related_type: Optional[Literal["proposal", "invoice"]] = None
-    related_id: Optional[str] = None
+    related_id: Optional[str] = Field(None, max_length=64)
     channel: ActivityChannel
     direction: ActivityDirection = "outbound"
-    summary: str
+    summary: str = Field(..., min_length=1, max_length=NOTES_LEN)
 
 
 # ---------- Serialization ----------
