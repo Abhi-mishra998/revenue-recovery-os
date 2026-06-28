@@ -709,20 +709,17 @@ async def create_activity(payload: ActivityCreate, user: dict = Depends(get_curr
 
 
 # ---------- Dashboard ----------
-@api.get("/dashboard/summary")
-async def dashboard_summary(user: dict = Depends(get_current_user)):
-    proposals = await proposals_repo.list_for_dashboard(user["id"])
-    invoices = await invoices_repo.list_for_dashboard(user["id"])
-    clients_map = await _clients_map_for(user["id"])
-
+def compute_dashboard_summary(proposals: List[dict], invoices: List[dict],
+                              clients_map: dict) -> dict:
+    """Pure function — unit-testable. Endpoint just wires it to the repos.
+    Inputs are the raw rows from list_for_dashboard; outputs are the wire
+    response. Recovery math lives here exactly once."""
     total_pipeline = 0.0
-    active_inr = 0.0
-    cold_inr = 0.0
-    dead_inr = 0.0
+    active_inr = cold_inr = dead_inr = 0.0
     cold_count = 0
     by_status_count = {"active": 0, "cold": 0, "dead": 0}
     by_stage_count = {"sent": 0, "negotiating": 0, "won": 0, "lost": 0}
-    at_risk_candidates = []
+    at_risk_candidates: list = []
 
     for p in proposals:
         stage = p.get("stage", "sent")
@@ -753,7 +750,6 @@ async def dashboard_summary(user: dict = Depends(get_current_user)):
             overdue_count += 1
             overdue_amount += float(inv["amount_inr"])
 
-    # Top 5 at-risk proposals: rank by value × days_silent (urgency).
     def _rank(item):
         p, _, v = item
         d = max(1, days_since(p["last_contact_date"]))
@@ -764,10 +760,7 @@ async def dashboard_summary(user: dict = Depends(get_current_user)):
     for p, status, value in at_risk_candidates[:5]:
         c = clients_map.get(p["client_id"], {})
         top_at_risk.append({
-            "id": p["id"],
-            "title": p["title"],
-            "value_inr": value,
-            "status": status,
+            "id": p["id"], "title": p["title"], "value_inr": value, "status": status,
             "days_silent": days_since(p["last_contact_date"]),
             "stage": p.get("stage", "sent"),
             "client_company_name": c.get("company_name", "Unknown"),
@@ -789,6 +782,14 @@ async def dashboard_summary(user: dict = Depends(get_current_user)):
         "by_stage": by_stage_count,
         "top_at_risk": top_at_risk,
     }
+
+
+@api.get("/dashboard/summary")
+async def dashboard_summary(user: dict = Depends(get_current_user)):
+    proposals = await proposals_repo.list_for_dashboard(user["id"])
+    invoices = await invoices_repo.list_for_dashboard(user["id"])
+    clients_map = await _clients_map_for(user["id"])
+    return compute_dashboard_summary(proposals, invoices, clients_map)
 
 
 # ---------- Admin: AI kill-switch ----------
