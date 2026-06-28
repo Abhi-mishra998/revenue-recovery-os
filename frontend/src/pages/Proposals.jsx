@@ -4,8 +4,9 @@ import { api } from "@/lib/api";
 import { inr, dateShort, dateForInput } from "@/lib/format";
 import { StatusBadge, StageBadge } from "@/components/StatusPill";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Plus, Trash2, Pencil, Search, ArrowUpDown, ArrowDown, ArrowUp } from "lucide-react";
+import { Plus, Trash2, Pencil, Search, ArrowUpDown, ArrowDown, ArrowUp, Upload } from "lucide-react";
 import { toast } from "sonner";
+import BulkAddDialog from "@/components/BulkAddDialog";
 
 const STAGE_OPTIONS = ["sent", "negotiating", "won", "lost"];
 const STATUS_FILTERS = ["all", "active", "cold", "dead"];
@@ -15,6 +16,7 @@ export default function Proposals() {
   const [rows, setRows] = useState([]);
   const [clients, setClients] = useState([]);
   const [editing, setEditing] = useState(null); // proposal or { __new: true }
+  const [bulkOpen, setBulkOpen] = useState(false);
 
   // Toolbar state
   const [query, setQuery] = useState("");
@@ -73,9 +75,14 @@ export default function Proposals() {
           <h1 className="text-3xl md:text-4xl font-semibold mt-1.5 text-slate-900">Proposals</h1>
           <p className="text-sm text-slate-500 mt-1.5">Auto status: Active ≤ 7d · Cold 7–14d · Dead 15d+ since last contact.</p>
         </div>
-        <button className="cta-primary" onClick={() => setEditing({ __new: true })} data-testid="new-proposal-btn">
-          <Plus className="w-4 h-4" /> New proposal
-        </button>
+        <div className="flex items-center gap-2">
+          <button className="cta-ghost" onClick={() => setBulkOpen(true)} data-testid="bulk-add-proposals-btn">
+            <Upload className="w-4 h-4" /> Bulk add
+          </button>
+          <button className="cta-primary" onClick={() => setEditing({ __new: true })} data-testid="new-proposal-btn">
+            <Plus className="w-4 h-4" /> New proposal
+          </button>
+        </div>
       </div>
 
       {/* Toolbar: search + filters */}
@@ -181,6 +188,13 @@ export default function Proposals() {
         proposal={editing && !editing.__new ? editing : null}
         clients={clients}
         onSaved={() => { setEditing(null); load(); }}
+      />
+      <BulkAddDialog
+        open={bulkOpen}
+        onOpenChange={setBulkOpen}
+        mode="proposals"
+        clients={clients}
+        onDone={load}
       />
     </div>
   );

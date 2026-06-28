@@ -3,13 +3,15 @@ import { api } from "@/lib/api";
 import { inr, dateShort, dateForInput } from "@/lib/format";
 import { StatusBadge } from "@/components/StatusPill";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Plus, Trash2, Pencil } from "lucide-react";
+import { Plus, Trash2, Pencil, Upload } from "lucide-react";
 import { toast } from "sonner";
+import BulkAddDialog from "@/components/BulkAddDialog";
 
 export default function Invoices() {
   const [rows, setRows] = useState([]);
   const [clients, setClients] = useState([]);
   const [editing, setEditing] = useState(null); // invoice or { __new: true }
+  const [bulkOpen, setBulkOpen] = useState(false);
 
   const load = async () => {
     const [iv, cl] = await Promise.all([api.get("/invoices"), api.get("/clients")]);
@@ -33,9 +35,14 @@ export default function Invoices() {
           <h1 className="text-3xl md:text-4xl font-semibold mt-1.5 text-slate-900">Invoices</h1>
           <p className="text-sm text-slate-500 mt-1.5">All invoices with auto status: paid / unpaid / overdue.</p>
         </div>
-        <button className="cta-primary" onClick={() => setEditing({ __new: true })} data-testid="new-invoice-btn">
-          <Plus className="w-4 h-4" /> New invoice
-        </button>
+        <div className="flex items-center gap-2">
+          <button className="cta-ghost" onClick={() => setBulkOpen(true)} data-testid="bulk-add-invoices-btn">
+            <Upload className="w-4 h-4" /> Bulk add
+          </button>
+          <button className="cta-primary" onClick={() => setEditing({ __new: true })} data-testid="new-invoice-btn">
+            <Plus className="w-4 h-4" /> New invoice
+          </button>
+        </div>
       </div>
 
       <div className="revora-card overflow-hidden mt-6">
@@ -86,6 +93,13 @@ export default function Invoices() {
         invoice={editing && !editing.__new ? editing : null}
         clients={clients}
         onSaved={() => { setEditing(null); load(); }}
+      />
+      <BulkAddDialog
+        open={bulkOpen}
+        onOpenChange={setBulkOpen}
+        mode="invoices"
+        clients={clients}
+        onDone={load}
       />
     </div>
   );
