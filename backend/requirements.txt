@@ -29,3 +29,4 @@ emergentintegrations==0.2.0
 slowapi>=0.1.9
 asyncpg>=0.29.0
 pgvector>=0.3.0
+pytest-cov>=5.0.0
