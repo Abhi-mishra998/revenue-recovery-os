@@ -11,6 +11,11 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone, timedelta
 
+from .db.repos import clients as clients_repo
+from .db.repos import proposals as proposals_repo
+from .db.repos import invoices as invoices_repo
+from .db.repos import activities as activities_repo
+
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
@@ -94,11 +99,24 @@ EXTRA_ACTIVITIES = [
 ]
 
 
-async def reset_demo_data_for_owner(db, owner_id: str) -> dict:
-    r_c = await db.clients.delete_many({"owner_id": owner_id})
-    r_p = await db.proposals.delete_many({"owner_id": owner_id})
-    r_i = await db.invoices.delete_many({"owner_id": owner_id})
-    r_a = await db.activities.delete_many({"owner_id": owner_id})
+async def reset_demo_data_for_owner(db=None, owner_id: str = "") -> dict:
+    """`db` arg kept for back-compat. Mongo path uses motor's delete_many for
+    speed; postgres path relies on ON DELETE CASCADE from users — easier to
+    call from the reset script that drops + reseeds an owner's universe."""
+    from . import db as db_mod  # local import — avoid module-load cycle
+    if db_mod.is_postgres():
+        from .db import pg
+        async with pg.with_user(owner_id) as conn:
+            for table in ("activities", "invoices", "proposals", "clients"):
+                await conn.execute(f"DELETE FROM {table}")
+        return {"clients_deleted": -1, "proposals_deleted": -1,
+                "invoices_deleted": -1, "activities_deleted": -1}
+    # Mongo path keeps the historical return shape with real counts.
+    from server import db as motor_db
+    r_c = await motor_db.clients.delete_many({"owner_id": owner_id})
+    r_p = await motor_db.proposals.delete_many({"owner_id": owner_id})
+    r_i = await motor_db.invoices.delete_many({"owner_id": owner_id})
+    r_a = await motor_db.activities.delete_many({"owner_id": owner_id})
     return {
         "clients_deleted": r_c.deleted_count,
         "proposals_deleted": r_p.deleted_count,
@@ -107,16 +125,21 @@ async def reset_demo_data_for_owner(db, owner_id: str) -> dict:
     }
 
 
-async def seed_demo_for_owner(db, owner_id: str, *, force: bool = False) -> dict:
+async def _count_clients_for_owner(owner_id: str) -> int:
+    rows = await clients_repo.list_for_owner(owner_id)
+    return len(rows)
+
+
+async def seed_demo_for_owner(db=None, owner_id: str = "", *, force: bool = False) -> dict:
+    """`db` arg kept for back-compat; repos dispatch on DB_ENGINE."""
     if not force:
-        existing = await db.clients.count_documents({"owner_id": owner_id})
-        if existing > 0:
+        if await _count_clients_for_owner(owner_id) > 0:
             return {"skipped": True, "reason": "existing data present"}
 
     client_ids = []
     for idx, c in enumerate(CLIENTS):
         cid = str(uuid.uuid4())
-        await db.clients.insert_one({
+        await clients_repo.insert({
             **c, "id": cid, "owner_id": owner_id,
             "created_at": _ago(60 - idx),
         })
@@ -125,7 +148,7 @@ async def seed_demo_for_owner(db, owner_id: str, *, force: bool = False) -> dict
     for (client_idx, title, value_inr, sent_d, last_d, stage) in PROPOSALS:
         pid = str(uuid.uuid4())
         cid = client_ids[client_idx]
-        await db.proposals.insert_one({
+        await proposals_repo.insert({
             "id": pid, "owner_id": owner_id, "client_id": cid,
             "title": title, "value_inr": value_inr,
             "sent_date": _ago(sent_d),
@@ -133,7 +156,7 @@ async def seed_demo_for_owner(db, owner_id: str, *, force: bool = False) -> dict
             "stage": stage, "notes": "",
             "created_at": _ago(sent_d),
         })
-        await db.activities.insert_one({
+        await activities_repo.insert({
             "id": str(uuid.uuid4()), "owner_id": owner_id, "client_id": cid,
             "related_type": "proposal", "related_id": pid,
             "channel": "email", "direction": "outbound",
@@ -145,7 +168,7 @@ async def seed_demo_for_owner(db, owner_id: str, *, force: bool = False) -> dict
         cid = client_ids[client_idx]
         due_iso = _ahead(due[1]) if due[0] == "ahead" else _ago(due[1])
         iid = str(uuid.uuid4())
-        await db.invoices.insert_one({
+        await invoices_repo.insert({
             "id": iid, "owner_id": owner_id, "client_id": cid,
             "invoice_no": invoice_no, "amount_inr": amount_inr,
             "issued_at": _ago(issued_d),
@@ -153,7 +176,7 @@ async def seed_demo_for_owner(db, owner_id: str, *, force: bool = False) -> dict
             "paid_date": _ago(paid_days) if paid_days is not None else None,
             "notes": "", "created_at": _ago(issued_d),
         })
-        await db.activities.insert_one({
+        await activities_repo.insert({
             "id": str(uuid.uuid4()), "owner_id": owner_id, "client_id": cid,
             "related_type": "invoice", "related_id": iid,
             "channel": "note", "direction": "internal",
@@ -163,7 +186,7 @@ async def seed_demo_for_owner(db, owner_id: str, *, force: bool = False) -> dict
 
     for (client_idx, channel, direction, summary, days_ago) in EXTRA_ACTIVITIES:
         cid = client_ids[client_idx]
-        await db.activities.insert_one({
+        await activities_repo.insert({
             "id": str(uuid.uuid4()), "owner_id": owner_id, "client_id": cid,
             "related_type": None, "related_id": None,
             "channel": channel, "direction": direction,

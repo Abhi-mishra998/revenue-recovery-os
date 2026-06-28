@@ -21,6 +21,10 @@ from datetime import datetime, timezone
 from statistics import median
 from typing import Optional
 
+from .db.repos import activities as activities_repo
+from .db.repos import client_memory as memory_repo
+from .db.repos import events as events_repo
+
 logger = logging.getLogger(__name__)
 
 OUTCOME_EVENT_TYPES = ("proposal.won", "proposal.lost", "invoice.payment_received")
@@ -74,10 +78,9 @@ def _derive_response_metrics(activities: list[dict]) -> tuple[Optional[float], O
     return typical, rate
 
 
-async def recompute_client_memory(db, *, owner_id: str, client_id: str) -> dict:
-    activities = await db.activities.find(
-        {"owner_id": owner_id, "client_id": client_id}, {"_id": 0},
-    ).to_list(2000)
+async def recompute_client_memory(db=None, *, owner_id: str, client_id: str) -> dict:
+    """`db` arg is kept for back-compat; the repos dispatch on DB_ENGINE."""
+    activities = await activities_repo.list_for_client_and_owner(client_id, owner_id, limit=2000)
 
     channel_counts: dict[str, int] = {}
     for a in activities:
@@ -89,46 +92,27 @@ async def recompute_client_memory(db, *, owner_id: str, client_id: str) -> dict:
 
     typical, rate = _derive_response_metrics(activities)
 
-    outcomes_cursor = db.events.find(
-        {"owner_id": owner_id,
-         "metadata.client_id": client_id,
-         "event_type": {"$in": list(OUTCOME_EVENT_TYPES)}},
-        {"_id": 0},
-    ).sort("created_at", -1).limit(10)
+    outcome_rows = await events_repo.list_outcomes_for_client(
+        owner_id, client_id, OUTCOME_EVENT_TYPES, limit=10,
+    )
     last_outcomes = [
         {"type": e["event_type"], "id": e["entity_id"], "at": e["created_at"]}
-        async for e in outcomes_cursor
+        for e in outcome_rows
     ]
 
-    res = await db.client_memory.find_one_and_update(
-        {"owner_id": owner_id, "client_id": client_id},
-        {
-            "$set": {
-                "channel_preference": channel_preference,
-                "channel_counts": channel_counts,
-                "typical_response_days": typical,
-                "response_rate": rate,
-                "last_outcomes": last_outcomes,
-                "updated_at": _now_iso(),
-            },
-            "$inc": {"recompute_count": 1},
-            "$setOnInsert": {
-                "id": __import__("uuid").uuid4().__str__(),
-                "owner_id": owner_id,
-                "client_id": client_id,
-            },
-        },
-        upsert=True,
-        return_document=True,
-    )
-    if res is not None:
-        res.pop("_id", None)
-    return res or {}
+    return await memory_repo.upsert(owner_id, client_id, {
+        "channel_preference":    channel_preference,
+        "channel_counts":        channel_counts,
+        "typical_response_days": typical,
+        "response_rate":         rate,
+        "last_outcomes":         last_outcomes,
+        "updated_at":            _now_iso(),
+    })
 
 
-async def get_or_compute_client_memory(db, *, owner_id: str, client_id: str) -> dict:
+async def get_or_compute_client_memory(db=None, *, owner_id: str, client_id: str) -> dict:
     """Return cached memory; recompute if missing."""
-    doc = await db.client_memory.find_one({"owner_id": owner_id, "client_id": client_id}, {"_id": 0})
+    doc = await memory_repo.get(owner_id, client_id)
     if doc:
         return doc
-    return await recompute_client_memory(db, owner_id=owner_id, client_id=client_id)
+    return await recompute_client_memory(owner_id=owner_id, client_id=client_id)

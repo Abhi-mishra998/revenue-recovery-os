@@ -39,6 +39,9 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import (
     Ed25519PublicKey,
 )
 
+from .db.repos import audit_log as audit_log_repo
+from .db.repos import settings as settings_repo
+
 logger = logging.getLogger(__name__)
 
 ZERO_HASH = "0" * 64
@@ -85,8 +88,10 @@ def _key_fingerprint(public_key: Ed25519PublicKey) -> str:
     return _sha256_hex(raw)[:16]
 
 
-async def load_signing_key(db) -> None:
-    """Load ed25519 key from env, else from settings doc, else generate+persist."""
+async def load_signing_key(db=None) -> None:
+    """Load ed25519 key from env, else from settings doc, else generate+persist.
+    The `db` arg is kept for backward compat; the settings repo dispatches on
+    DB_ENGINE itself."""
     global _signing_key, _public_key_fp
     env_key = os.environ.get("AUDIT_SIGNING_KEY")
     if env_key:
@@ -96,7 +101,7 @@ async def load_signing_key(db) -> None:
         logger.info("Audit key loaded from AUDIT_SIGNING_KEY env (fp=%s)", _public_key_fp)
         return
 
-    doc = await db.settings.find_one({"id": SETTINGS_DOC_ID})
+    doc = await settings_repo.get_global()
     if doc and doc.get("audit_signing_key"):
         raw = base64.b64decode(doc["audit_signing_key"])
         _signing_key = Ed25519PrivateKey.from_private_bytes(raw)
@@ -110,14 +115,7 @@ async def load_signing_key(db) -> None:
         format=serialization.PrivateFormat.Raw,
         encryption_algorithm=serialization.NoEncryption(),
     )
-    await db.settings.update_one(
-        {"id": SETTINGS_DOC_ID},
-        {"$setOnInsert": {
-            "id": SETTINGS_DOC_ID,
-            "audit_signing_key": base64.b64encode(raw).decode("ascii"),
-        }},
-        upsert=True,
-    )
+    await settings_repo.set_audit_signing_key(base64.b64encode(raw).decode("ascii"))
     _signing_key = key
     _public_key_fp = _key_fingerprint(key.public_key())
     logger.warning(
@@ -133,7 +131,7 @@ def get_public_key_fp() -> str:
 
 
 async def append_audit(
-    db,
+    db=None,
     *,
     action: str,
     actor_id: str,
@@ -143,13 +141,12 @@ async def append_audit(
     payload: Any = None,
 ) -> dict:
     """Append a record. Raises on signing/insert failure — caller must let it
-    bubble so a missing audit row never silently masks an action."""
+    bubble so a missing audit row never silently masks an action.
+    The `db` arg is kept for back-compat; the repo dispatches on DB_ENGINE."""
     if _signing_key is None:
         raise RuntimeError("audit signing key not loaded — call load_signing_key first")
     async with _append_lock:
-        last = await db.audit_log.find_one(
-            {}, sort=[("seq", -1)], projection={"record_hash": 1, "seq": 1},
-        )
+        last = await audit_log_repo.latest_seq_and_hash()
         seq = (last["seq"] + 1) if last else 1
         prev_hash = last["record_hash"] if last else ZERO_HASH
         rec = {
@@ -169,24 +166,23 @@ async def append_audit(
             _signing_key.sign(rec["record_hash"].encode("utf-8"))
         ).decode("ascii")
         rec["public_key_fp"] = _public_key_fp
-        await db.audit_log.insert_one(rec)
-        rec.pop("_id", None)
+        await audit_log_repo.insert(rec)
         return rec
 
 
-async def verify_chain(db, limit: Optional[int] = None) -> dict:
-    """Walk the chain start to end. Returns ok/issues/records_checked."""
+async def verify_chain(db=None, limit: Optional[int] = None) -> dict:
+    """Walk the chain start to end. Returns ok/issues/records_checked.
+    `db` arg kept for back-compat."""
     if _signing_key is None:
         raise RuntimeError("audit signing key not loaded")
     public_key = _signing_key.public_key()
-    cursor = db.audit_log.find({}, sort=[("seq", 1)])
-    if limit is not None:
-        cursor = cursor.limit(limit)
     prev_hash = ZERO_HASH
     seq_expected = 1
     issues: list[str] = []
     count = 0
-    async for r in cursor:
+    async for r in audit_log_repo.iter_in_order():
+        if limit is not None and count >= limit:
+            break
         if r["seq"] != seq_expected:
             issues.append(f"seq gap: expected {seq_expected}, got {r['seq']}")
         if r["prev_hash"] != prev_hash:

@@ -29,8 +29,20 @@ from services.audit import append_audit, load_signing_key, verify_chain, get_pub
 from services.events import emit_event
 from services.memory import recompute_client_memory, get_or_compute_client_memory
 from services.data import extract_proposal_features, predict_close_probability
-from services.db import is_postgres
+from services.db import is_postgres, is_mongo
 from services.db import pg as pgdb
+from services.db.repos import (
+    users      as users_repo,
+    clients    as clients_repo,
+    proposals  as proposals_repo,
+    invoices   as invoices_repo,
+    activities as activities_repo,
+    followups  as followups_repo,
+    events     as events_repo,
+    client_memory as memory_repo,
+    audit_log  as audit_log_repo,
+    settings   as settings_repo,
+)
 
 # ---------- MongoDB ----------
 mongo_url = os.environ['MONGO_URL']
@@ -110,7 +122,7 @@ async def get_current_user(creds: Optional[HTTPAuthorizationCredentials] = Depen
         raise HTTPException(status_code=401, detail="Token expired")
     except jwt.InvalidTokenError:
         raise HTTPException(status_code=401, detail="Invalid token")
-    user = await db.users.find_one({"id": payload["sub"]})
+    user = await users_repo.get_by_id(payload["sub"])
     if not user:
         raise HTTPException(status_code=401, detail="User not found")
     if int(payload.get("tv", 0)) != int(user.get("token_version", 0)):
@@ -141,12 +153,28 @@ def require_admin(user: dict = Depends(get_current_user)) -> dict:
 
 
 async def assert_owns_client(client_id: str, user: dict) -> None:
-    if not await db.clients.find_one({"id": client_id, "owner_id": user["id"]}, {"_id": 1}):
+    if not await clients_repo.exists_for_owner(client_id, user["id"]):
         raise HTTPException(404, "Client not found")
 
 
+_EXISTS_BY_COLLECTION = {
+    "clients":   clients_repo.exists_for_owner,
+    "proposals": proposals_repo.exists_for_owner,
+}
+
+
 async def assert_owns(collection: str, doc_id: str, user: dict) -> None:
-    if not await db[collection].find_one({"id": doc_id, "owner_id": user["id"]}, {"_id": 1}):
+    """Generic ownership check used for activity.related_id ∈ {proposals, invoices}."""
+    fn = _EXISTS_BY_COLLECTION.get(collection)
+    if fn is None:
+        # invoices and others — fall back to a per-collection lookup
+        if collection == "invoices":
+            inv = await invoices_repo.get_for_owner(doc_id, user["id"])
+            if not inv:
+                raise HTTPException(404, "Not found")
+            return
+        raise HTTPException(404, "Not found")
+    if not await fn(doc_id, user["id"]):
         raise HTTPException(404, "Not found")
 
 
@@ -314,7 +342,7 @@ def serialize_invoice(inv: dict, clients_map: Optional[dict] = None) -> dict:
 @limiter.limit("10/minute")
 async def register(request: Request, req: RegisterReq):
     email = req.email.lower()
-    existing = await db.users.find_one({"email": email})
+    existing = await users_repo.get_by_email(email)
     if existing:
         raise HTTPException(status_code=400, detail="Email already registered")
     user_id = str(uuid.uuid4())
@@ -327,7 +355,7 @@ async def register(request: Request, req: RegisterReq):
         "token_version": 0,
         "created_at": now_utc().isoformat(),
     }
-    await db.users.insert_one(doc)
+    await users_repo.insert(doc)
     await append_audit(db, action="auth.register", actor_id=user_id, actor_email=email,
                        resource_type="user", resource_id=user_id, payload={"name": req.name})
     token = create_access_token(user_id, email, 0)
@@ -338,7 +366,7 @@ async def register(request: Request, req: RegisterReq):
 @limiter.limit("30/minute")
 async def login(request: Request, req: LoginReq):
     email = req.email.lower()
-    user = await db.users.find_one({"email": email})
+    user = await users_repo.get_by_email(email)
     if not user or not verify_password(req.password, user.get("password_hash", "")):
         raise HTTPException(status_code=401, detail="Invalid email or password")
     token = create_access_token(user["id"], email, user.get("token_version", 0))
@@ -367,7 +395,7 @@ async def google_session(request: Request, req: GoogleSessionReq):
     if not email:
         raise HTTPException(status_code=400, detail="Google session missing email")
 
-    user = await db.users.find_one({"email": email})
+    user = await users_repo.get_by_email(email)
     if user is None:
         user_id = str(uuid.uuid4())
         user = {
@@ -379,7 +407,7 @@ async def google_session(request: Request, req: GoogleSessionReq):
             "token_version": 0,
             "created_at": now_utc().isoformat(),
         }
-        await db.users.insert_one(user.copy())
+        await users_repo.insert(user.copy())
         await append_audit(db, action="auth.google_session.register",
                            actor_id=user["id"], actor_email=email,
                            resource_type="user", resource_id=user["id"],
@@ -401,16 +429,15 @@ async def me(user: dict = Depends(get_current_user)):
 @api.post("/auth/logout", status_code=204)
 async def logout(user: dict = Depends(get_current_user)):
     """Revoke every outstanding token for this user by bumping token_version."""
-    await db.users.update_one({"id": user["id"]}, {"$inc": {"token_version": 1}})
-    await append_audit(db, action="auth.logout", actor_id=user["id"], actor_email=user["email"])
+    await users_repo.bump_token_version(user["id"])
+    await append_audit(action="auth.logout", actor_id=user["id"], actor_email=user["email"])
     return None
 
 
 # ---------- Clients ----------
 @api.get("/clients")
 async def list_clients(user: dict = Depends(get_current_user)):
-    rows = await db.clients.find({"owner_id": user["id"]}, {"_id": 0}).sort("company_name", 1).to_list(2000)
-    return rows
+    return await clients_repo.list_for_owner(user["id"])
 
 
 @api.post("/clients")
@@ -419,20 +446,19 @@ async def create_client(payload: ClientCreate, user: dict = Depends(get_current_
     doc["id"] = str(uuid.uuid4())
     doc["owner_id"] = user["id"]
     doc["created_at"] = now_utc().isoformat()
-    await db.clients.insert_one(doc.copy())
-    doc.pop("_id", None)
-    await append_audit(db, action="client.create", actor_id=user["id"], actor_email=user["email"],
+    await clients_repo.insert(doc)
+    await append_audit(action="client.create", actor_id=user["id"], actor_email=user["email"],
                        resource_type="client", resource_id=doc["id"], payload=payload.model_dump())
     return doc
 
 
 @api.get("/clients/{client_id}")
 async def get_client(client_id: str, user: dict = Depends(get_current_user)):
-    c = await db.clients.find_one({"id": client_id, "owner_id": user["id"]}, {"_id": 0})
+    c = await clients_repo.get_for_owner(client_id, user["id"])
     if not c:
         raise HTTPException(404, "Client not found")
-    proposals = await db.proposals.find({"client_id": client_id, "owner_id": user["id"]}, {"_id": 0}).to_list(500)
-    invoices = await db.invoices.find({"client_id": client_id, "owner_id": user["id"]}, {"_id": 0}).to_list(500)
+    proposals = await proposals_repo.list_for_client_and_owner(client_id, user["id"], limit=500)
+    invoices = await invoices_repo.list_for_client_and_owner(client_id, user["id"], limit=500)
     return {
         "client": c,
         "proposals": [serialize_proposal(p) for p in proposals],
@@ -445,22 +471,22 @@ async def update_client(client_id: str, payload: ClientUpdate, user: dict = Depe
     updates = {k: v for k, v in payload.model_dump().items() if v is not None}
     if not updates:
         raise HTTPException(400, "Nothing to update")
-    res = await db.clients.update_one({"id": client_id, "owner_id": user["id"]}, {"$set": updates})
-    if res.matched_count == 0:
+    matched = await clients_repo.update_for_owner(client_id, user["id"], updates)
+    if not matched:
         raise HTTPException(404, "Client not found")
-    c = await db.clients.find_one({"id": client_id, "owner_id": user["id"]}, {"_id": 0})
-    await append_audit(db, action="client.update", actor_id=user["id"], actor_email=user["email"],
+    c = await clients_repo.get_for_owner(client_id, user["id"])
+    await append_audit(action="client.update", actor_id=user["id"], actor_email=user["email"],
                        resource_type="client", resource_id=client_id, payload=updates)
     return c
 
 
 @api.delete("/clients/{client_id}")
 async def delete_client(client_id: str, user: dict = Depends(get_current_user)):
-    res = await db.clients.delete_one({"id": client_id, "owner_id": user["id"]})
-    if res.deleted_count:
-        await append_audit(db, action="client.delete", actor_id=user["id"], actor_email=user["email"],
+    deleted = await clients_repo.delete_for_owner(client_id, user["id"])
+    if deleted:
+        await append_audit(action="client.delete", actor_id=user["id"], actor_email=user["email"],
                            resource_type="client", resource_id=client_id)
-        await db.client_memory.delete_many({"owner_id": user["id"], "client_id": client_id})
+        await memory_repo.delete_for_client(user["id"], client_id)
     return {"ok": True}
 
 
@@ -468,14 +494,19 @@ async def delete_client(client_id: str, user: dict = Depends(get_current_user)):
 async def get_client_memory(client_id: str, user: dict = Depends(get_current_user)):
     """Per-client derived features. Cached doc; rebuilt on read if missing."""
     await assert_owns_client(client_id, user)
-    return await get_or_compute_client_memory(db, owner_id=user["id"], client_id=client_id)
+    return await get_or_compute_client_memory(owner_id=user["id"], client_id=client_id)
 
 
 # ---------- Proposals ----------
+async def _clients_map_for(owner_id: str) -> dict:
+    rows = await clients_repo.list_for_owner(owner_id)
+    return {c["id"]: c for c in rows}
+
+
 @api.get("/proposals")
 async def list_proposals(user: dict = Depends(get_current_user)):
-    rows = await db.proposals.find({"owner_id": user["id"]}, {"_id": 0}).to_list(5000)
-    clients_map = {c["id"]: c async for c in db.clients.find({"owner_id": user["id"]}, {"_id": 0})}
+    rows = await proposals_repo.list_for_owner(user["id"])
+    clients_map = await _clients_map_for(user["id"])
     out = [serialize_proposal(p, clients_map) for p in rows]
     out.sort(key=lambda x: x["days_silent"], reverse=True)
     return out
@@ -491,28 +522,24 @@ async def create_proposal(payload: ProposalCreate, user: dict = Depends(get_curr
     doc["sent_date"] = doc.get("sent_date") or now_iso
     doc["last_contact_date"] = doc.get("last_contact_date") or doc["sent_date"]
     doc["created_at"] = now_iso
-    await db.proposals.insert_one(doc.copy())
-    await append_audit(db, action="proposal.create", actor_id=user["id"], actor_email=user["email"],
+    await proposals_repo.insert(doc)
+    await append_audit(action="proposal.create", actor_id=user["id"], actor_email=user["email"],
                        resource_type="proposal", resource_id=doc["id"], payload=payload.model_dump())
-    await emit_event(db, owner_id=user["id"], event_type="proposal.created",
+    await emit_event(owner_id=user["id"], event_type="proposal.created",
                      entity_type="proposal", entity_id=doc["id"], source="user",
                      metadata={"value_inr": doc["value_inr"], "stage": doc["stage"], "client_id": doc["client_id"]})
-    return serialize_proposal({k: v for k, v in doc.items() if k != "_id"})
+    return serialize_proposal(doc)
 
 
 @api.get("/proposals/{proposal_id}")
 async def get_proposal(proposal_id: str, user: dict = Depends(get_current_user)):
-    p = await db.proposals.find_one({"id": proposal_id, "owner_id": user["id"]}, {"_id": 0})
+    p = await proposals_repo.get_for_owner(proposal_id, user["id"])
     if not p:
         raise HTTPException(404, "Proposal not found")
-    c = await db.clients.find_one({"id": p["client_id"], "owner_id": user["id"]}, {"_id": 0}) or {}
-    clients_map = {p["client_id"]: c}
-    out = serialize_proposal(p, clients_map)
-    # Live inference: features pulled from proposal + client memory,
-    # heuristic baseline today; trained model swaps behind same shape later.
-    memory = await db.client_memory.find_one(
-        {"owner_id": user["id"], "client_id": p["client_id"]}, {"_id": 0},
-    )
+    c = await clients_repo.get_for_owner(p["client_id"], user["id"]) or {}
+    out = serialize_proposal(p, {p["client_id"]: c})
+    # Live inference: heuristic baseline; trained model swaps behind same shape later.
+    memory = await memory_repo.get(user["id"], p["client_id"])
     enriched_proposal = {**p, "client_industry": c.get("industry")}
     features = extract_proposal_features(proposal=enriched_proposal, memory=memory)
     out["prediction"] = predict_close_probability(features).to_dict()
@@ -523,10 +550,7 @@ async def get_proposal(proposal_id: str, user: dict = Depends(get_current_user))
 async def list_proposal_followups(proposal_id: str, user: dict = Depends(get_current_user)):
     """Generation history for a proposal — newest first, grouped by generation_id."""
     await assert_owns("proposals", proposal_id, user)
-    rows = await db.followups.find(
-        {"owner_id": user["id"], "proposal_id": proposal_id}, {"_id": 0},
-    ).sort("created_at", -1).limit(100).to_list(100)
-    return rows
+    return await followups_repo.list_for_proposal(proposal_id, user["id"], limit=100)
 
 
 @api.patch("/proposals/{proposal_id}")
@@ -535,8 +559,7 @@ async def update_proposal(proposal_id: str, payload: ProposalUpdate, user: dict 
     if not updates:
         raise HTTPException(400, "Nothing to update")
 
-    # If stage is changing, capture the prior + stamp outcome_at on terminal transitions.
-    prior = await db.proposals.find_one({"id": proposal_id, "owner_id": user["id"]}, {"_id": 0})
+    prior = await proposals_repo.get_for_owner(proposal_id, user["id"])
     if not prior:
         raise HTTPException(404, "Proposal not found")
     prior_stage = prior.get("stage")
@@ -545,33 +568,33 @@ async def update_proposal(proposal_id: str, payload: ProposalUpdate, user: dict 
     if stage_changing and new_stage in ("won", "lost"):
         updates["outcome_at"] = now_utc().isoformat()
 
-    await db.proposals.update_one({"id": proposal_id, "owner_id": user["id"]}, {"$set": updates})
-    p = await db.proposals.find_one({"id": proposal_id, "owner_id": user["id"]}, {"_id": 0})
-    await append_audit(db, action="proposal.update", actor_id=user["id"], actor_email=user["email"],
+    await proposals_repo.update_for_owner(proposal_id, user["id"], updates)
+    p = await proposals_repo.get_for_owner(proposal_id, user["id"])
+    await append_audit(action="proposal.update", actor_id=user["id"], actor_email=user["email"],
                        resource_type="proposal", resource_id=proposal_id, payload=updates)
 
     if stage_changing:
         sent_iso = prior.get("sent_date")
         days_to_close = days_since(sent_iso) if sent_iso else None
-        await emit_event(db, owner_id=user["id"], event_type="proposal.stage_changed",
+        await emit_event(owner_id=user["id"], event_type="proposal.stage_changed",
                          entity_type="proposal", entity_id=proposal_id, source="user",
                          prior_value=prior_stage, new_value=new_stage,
                          metadata={"value_inr": prior.get("value_inr"), "client_id": prior.get("client_id")})
         if new_stage in ("won", "lost"):
-            await emit_event(db, owner_id=user["id"], event_type=f"proposal.{new_stage}",
+            await emit_event(owner_id=user["id"], event_type=f"proposal.{new_stage}",
                              entity_type="proposal", entity_id=proposal_id, source="user",
                              metadata={"value_inr": prior.get("value_inr"),
                                        "days_to_close": days_to_close,
                                        "client_id": prior.get("client_id")})
-            await recompute_client_memory(db, owner_id=user["id"], client_id=prior["client_id"])
+            await recompute_client_memory(owner_id=user["id"], client_id=prior["client_id"])
     return serialize_proposal(p)
 
 
 @api.delete("/proposals/{proposal_id}")
 async def delete_proposal(proposal_id: str, user: dict = Depends(get_current_user)):
-    res = await db.proposals.delete_one({"id": proposal_id, "owner_id": user["id"]})
-    if res.deleted_count:
-        await append_audit(db, action="proposal.delete", actor_id=user["id"], actor_email=user["email"],
+    deleted = await proposals_repo.delete_for_owner(proposal_id, user["id"])
+    if deleted:
+        await append_audit(action="proposal.delete", actor_id=user["id"], actor_email=user["email"],
                            resource_type="proposal", resource_id=proposal_id)
     return {"ok": True}
 
@@ -579,8 +602,8 @@ async def delete_proposal(proposal_id: str, user: dict = Depends(get_current_use
 # ---------- Invoices ----------
 @api.get("/invoices")
 async def list_invoices(user: dict = Depends(get_current_user)):
-    rows = await db.invoices.find({"owner_id": user["id"]}, {"_id": 0}).to_list(5000)
-    clients_map = {c["id"]: c async for c in db.clients.find({"owner_id": user["id"]}, {"_id": 0})}
+    rows = await invoices_repo.list_for_owner(user["id"])
+    clients_map = await _clients_map_for(user["id"])
     out = [serialize_invoice(inv, clients_map) for inv in rows]
     out.sort(key=lambda x: x["days_overdue"], reverse=True)
     return out
@@ -595,19 +618,19 @@ async def create_invoice(payload: InvoiceCreate, user: dict = Depends(get_curren
     doc["owner_id"] = user["id"]
     doc["issued_at"] = now_iso
     doc["created_at"] = now_iso
-    await db.invoices.insert_one(doc.copy())
-    await append_audit(db, action="invoice.create", actor_id=user["id"], actor_email=user["email"],
+    await invoices_repo.insert(doc)
+    await append_audit(action="invoice.create", actor_id=user["id"], actor_email=user["email"],
                        resource_type="invoice", resource_id=doc["id"], payload=payload.model_dump())
-    await emit_event(db, owner_id=user["id"], event_type="invoice.created",
+    await emit_event(owner_id=user["id"], event_type="invoice.created",
                      entity_type="invoice", entity_id=doc["id"], source="user",
                      metadata={"amount_inr": doc["amount_inr"], "due_date": doc["due_date"],
                                "client_id": doc["client_id"]})
-    return serialize_invoice({k: v for k, v in doc.items() if k != "_id"})
+    return serialize_invoice(doc)
 
 
 @api.get("/invoices/{invoice_id}")
 async def get_invoice(invoice_id: str, user: dict = Depends(get_current_user)):
-    inv = await db.invoices.find_one({"id": invoice_id, "owner_id": user["id"]}, {"_id": 0})
+    inv = await invoices_repo.get_for_owner(invoice_id, user["id"])
     if not inv:
         raise HTTPException(404, "Invoice not found")
     return serialize_invoice(inv)
@@ -618,32 +641,32 @@ async def update_invoice(invoice_id: str, payload: InvoiceUpdate, user: dict = D
     updates = {k: v for k, v in payload.model_dump().items() if v is not None}
     if not updates:
         raise HTTPException(400, "Nothing to update")
-    prior = await db.invoices.find_one({"id": invoice_id, "owner_id": user["id"]}, {"_id": 0})
+    prior = await invoices_repo.get_for_owner(invoice_id, user["id"])
     if not prior:
         raise HTTPException(404, "Invoice not found")
     became_paid = (not prior.get("paid_date")) and updates.get("paid_date")
 
-    await db.invoices.update_one({"id": invoice_id, "owner_id": user["id"]}, {"$set": updates})
-    inv = await db.invoices.find_one({"id": invoice_id, "owner_id": user["id"]}, {"_id": 0})
-    await append_audit(db, action="invoice.update", actor_id=user["id"], actor_email=user["email"],
+    await invoices_repo.update_for_owner(invoice_id, user["id"], updates)
+    inv = await invoices_repo.get_for_owner(invoice_id, user["id"])
+    await append_audit(action="invoice.update", actor_id=user["id"], actor_email=user["email"],
                        resource_type="invoice", resource_id=invoice_id, payload=updates)
 
     if became_paid:
         _, days_overdue_at_payment = compute_invoice_status_and_overdue({**prior, "paid_date": None})
-        await emit_event(db, owner_id=user["id"], event_type="invoice.payment_received",
+        await emit_event(owner_id=user["id"], event_type="invoice.payment_received",
                          entity_type="invoice", entity_id=invoice_id, source="user",
                          metadata={"amount_inr": prior.get("amount_inr"),
                                    "days_overdue_at_payment": days_overdue_at_payment,
                                    "client_id": prior.get("client_id")})
-        await recompute_client_memory(db, owner_id=user["id"], client_id=prior["client_id"])
+        await recompute_client_memory(owner_id=user["id"], client_id=prior["client_id"])
     return serialize_invoice(inv)
 
 
 @api.delete("/invoices/{invoice_id}")
 async def delete_invoice(invoice_id: str, user: dict = Depends(get_current_user)):
-    res = await db.invoices.delete_one({"id": invoice_id, "owner_id": user["id"]})
-    if res.deleted_count:
-        await append_audit(db, action="invoice.delete", actor_id=user["id"], actor_email=user["email"],
+    deleted = await invoices_repo.delete_for_owner(invoice_id, user["id"])
+    if deleted:
+        await append_audit(action="invoice.delete", actor_id=user["id"], actor_email=user["email"],
                            resource_type="invoice", resource_id=invoice_id)
     return {"ok": True}
 
@@ -657,19 +680,16 @@ async def list_events(
 ):
     """Read-only tail of the events stream, scoped to the caller's tenant."""
     limit = max(1, min(1000, limit))
-    q: dict = {"owner_id": user["id"]}
-    if entity_type: q["entity_type"] = entity_type
-    if entity_id:   q["entity_id"] = entity_id
-    if event_type:  q["event_type"] = event_type
-    rows = await db.events.find(q, {"_id": 0}).sort("created_at", -1).limit(limit).to_list(limit)
-    return rows
+    return await events_repo.list_filtered(
+        user["id"], entity_type=entity_type, entity_id=entity_id,
+        event_type=event_type, limit=limit,
+    )
 
 
 # ---------- Activities ----------
 @api.get("/activities")
 async def list_activities(user: dict = Depends(get_current_user)):
-    rows = await db.activities.find({"owner_id": user["id"]}, {"_id": 0}).sort("created_at", -1).limit(200).to_list(200)
-    return rows
+    return await activities_repo.list_for_owner(user["id"], limit=200)
 
 
 @api.post("/activities")
@@ -681,20 +701,19 @@ async def create_activity(payload: ActivityCreate, user: dict = Depends(get_curr
     doc["id"] = str(uuid.uuid4())
     doc["owner_id"] = user["id"]
     doc["created_at"] = now_utc().isoformat()
-    await db.activities.insert_one(doc.copy())
-    doc.pop("_id", None)
-    await append_audit(db, action="activity.create", actor_id=user["id"], actor_email=user["email"],
+    await activities_repo.insert(doc)
+    await append_audit(action="activity.create", actor_id=user["id"], actor_email=user["email"],
                        resource_type="activity", resource_id=doc["id"], payload=payload.model_dump())
-    await recompute_client_memory(db, owner_id=user["id"], client_id=doc["client_id"])
+    await recompute_client_memory(owner_id=user["id"], client_id=doc["client_id"])
     return doc
 
 
 # ---------- Dashboard ----------
 @api.get("/dashboard/summary")
 async def dashboard_summary(user: dict = Depends(get_current_user)):
-    proposals = await db.proposals.find({"owner_id": user["id"]}, {"_id": 0}).to_list(10000)
-    invoices = await db.invoices.find({"owner_id": user["id"]}, {"_id": 0}).to_list(10000)
-    clients_map = {c["id"]: c async for c in db.clients.find({"owner_id": user["id"]}, {"_id": 0})}
+    proposals = await proposals_repo.list_for_dashboard(user["id"])
+    invoices = await invoices_repo.list_for_dashboard(user["id"])
+    clients_map = await _clients_map_for(user["id"])
 
     total_pipeline = 0.0
     active_inr = 0.0
@@ -773,10 +792,8 @@ async def dashboard_summary(user: dict = Depends(get_current_user)):
 
 
 # ---------- Admin: AI kill-switch ----------
-# ponytail: per-call DB lookup on a single tiny doc (~1ms). Cache in-process
-# if it shows up in profiles.
 async def ai_killswitch_enabled() -> bool:
-    doc = await db.settings.find_one({"id": "global"}, {"ai_killswitch": 1})
+    doc = await settings_repo.get_global()
     return bool(doc and doc.get("ai_killswitch"))
 
 
@@ -791,12 +808,8 @@ async def get_killswitch(admin: dict = Depends(require_admin)):
 
 @api.post("/admin/killswitch")
 async def set_killswitch(req: KillSwitchReq, admin: dict = Depends(require_admin)):
-    await db.settings.update_one(
-        {"id": "global"},
-        {"$set": {"ai_killswitch": req.enabled}, "$setOnInsert": {"id": "global"}},
-        upsert=True,
-    )
-    await append_audit(db, action="admin.killswitch.set",
+    await settings_repo.set_ai_killswitch(req.enabled)
+    await append_audit(action="admin.killswitch.set",
                        actor_id=admin["id"], actor_email=admin["email"],
                        payload={"enabled": req.enabled})
     return {"ai_killswitch": req.enabled}
@@ -831,7 +844,7 @@ async def admin_ai_config(admin: dict = Depends(require_admin)):
 @api.get("/admin/audit-log/verify")
 async def admin_audit_verify(limit: Optional[int] = None, admin: dict = Depends(require_admin)):
     """Re-walk the audit chain and report hash/signature integrity."""
-    return await verify_chain(db, limit=limit)
+    return await verify_chain(limit=limit)
 
 
 @api.get("/admin/audit-log")
@@ -841,11 +854,8 @@ async def admin_audit_list(
     """Paginated read of audit records, newest first."""
     page = max(1, page)
     page_size = max(1, min(500, page_size))
-    skip = (page - 1) * page_size
-    total = await db.audit_log.count_documents({})
-    rows = await db.audit_log.find(
-        {}, {"_id": 0},
-    ).sort("seq", -1).skip(skip).limit(page_size).to_list(page_size)
+    total = await audit_log_repo.count()
+    rows = await audit_log_repo.list_paginated(page, page_size)
     return {
         "page": page, "page_size": page_size, "total": total,
         "public_key_fp": get_public_key_fp(),
@@ -862,10 +872,10 @@ async def generate_followup_for_proposal(request: Request, proposal_id: str, use
     """
     if await ai_killswitch_enabled():
         raise HTTPException(status_code=503, detail="AI generation is currently disabled by the administrator.")
-    p = await db.proposals.find_one({"id": proposal_id, "owner_id": user["id"]})
+    p = await proposals_repo.get_for_owner(proposal_id, user["id"])
     if not p:
         raise HTTPException(404, "Proposal not found")
-    c = await db.clients.find_one({"id": p["client_id"], "owner_id": user["id"]})
+    c = await clients_repo.get_for_owner(p["client_id"], user["id"])
     if not c:
         raise HTTPException(404, "Client not found")
 
@@ -910,20 +920,20 @@ async def generate_followup_for_proposal(request: Request, proposal_id: str, use
         "latency_ms": latency_ms,
         "created_at": now_iso,
     }
-    await db.followups.insert_many([
+    await followups_repo.insert_many([
         {**common, "id": wa_id, "channel": "whatsapp",
          "draft_text": result["whatsapp_text"]},
         {**common, "id": em_id, "channel": "email",
          "draft_text": (f"Subject: {result['email_subject']}\n\n{result['email_body']}").strip()},
     ])
-    await append_audit(db, action="ai.followup.generate",
+    await append_audit(action="ai.followup.generate",
                        actor_id=user["id"], actor_email=user["email"],
                        resource_type="proposal", resource_id=proposal_id,
                        payload={"days_silent": days, "generation_id": generation_id,
                                 "prompt_ref": result.get("prompt_ref"),
                                 "route_ref": result.get("route_ref"),
                                 "latency_ms": latency_ms})
-    await emit_event(db, owner_id=user["id"], event_type="followup.generated",
+    await emit_event(owner_id=user["id"], event_type="followup.generated",
                      entity_type="proposal", entity_id=proposal_id, source="system",
                      metadata={"generation_id": generation_id,
                                "prompt_ref": result.get("prompt_ref"),
@@ -999,23 +1009,24 @@ async def seed_admin():
     Requires ADMIN_PASSWORD env var if no admin exists yet; otherwise no-op.
     """
     admin_email = os.environ.get("ADMIN_EMAIL", "founder@bytehubble.com").lower()
-    existing = await db.users.find_one({"email": admin_email})
+    existing = await users_repo.get_by_email(admin_email)
     if existing is not None:
-        await seed_demo_for_owner(db, existing["id"])
+        await seed_demo_for_owner(owner_id=existing["id"])
         return
     admin_password = os.environ.get("ADMIN_PASSWORD")
     if not admin_password:
         logger.warning("ADMIN_PASSWORD not set and no admin user exists — skipping admin seed.")
         return
     user_id = str(uuid.uuid4())
-    await db.users.insert_one({
+    await users_repo.insert({
         "id": user_id, "email": admin_email,
         "name": "ByteHubble Founder",
         "auth_provider": "email",
         "password_hash": hash_password(admin_password),
+        "token_version": 0,
         "created_at": now_utc().isoformat(),
     })
-    await seed_demo_for_owner(db, user_id)
+    await seed_demo_for_owner(owner_id=user_id)
 
 
 @api.get("/")
@@ -1052,26 +1063,30 @@ logger = logging.getLogger(__name__)
 
 @app.on_event("startup")
 async def on_startup():
-    await db.users.create_index("email", unique=True)
-    await db.clients.create_index([("owner_id", 1), ("company_name", 1)])
-    await db.proposals.create_index([("owner_id", 1)])
-    await db.invoices.create_index([("owner_id", 1)])
-    await db.activities.create_index([("owner_id", 1), ("created_at", -1)])
-    await db.followups.create_index([("owner_id", 1), ("proposal_id", 1), ("created_at", -1)])
-    await db.audit_log.create_index("seq", unique=True)
-    await db.audit_log.create_index([("actor_id", 1), ("timestamp", -1)])
-    await db.audit_log.create_index([("action", 1), ("timestamp", -1)])
-    await db.events.create_index([("owner_id", 1), ("entity_id", 1), ("created_at", -1)])
-    await db.events.create_index([("owner_id", 1), ("event_type", 1), ("created_at", -1)])
-    await db.client_memory.create_index([("owner_id", 1), ("client_id", 1)], unique=True)
-    await db.settings.create_index("id", unique=True)
-    await migrate_legacy_fields()
-    await load_signing_key(db)
-    await seed_admin()
     if is_postgres():
         await pgdb.init_pool()
         logger.info("DB_ENGINE=postgres — asyncpg pool ready.")
-    logger.info("Revora ready (audit key fp=%s).", get_public_key_fp())
+    if is_mongo():
+        # Mongo-only: indexes + legacy field-rename migration. Postgres ships
+        # its indexes in the schema file and has no legacy data to rename.
+        await db.users.create_index("email", unique=True)
+        await db.clients.create_index([("owner_id", 1), ("company_name", 1)])
+        await db.proposals.create_index([("owner_id", 1)])
+        await db.invoices.create_index([("owner_id", 1)])
+        await db.activities.create_index([("owner_id", 1), ("created_at", -1)])
+        await db.followups.create_index([("owner_id", 1), ("proposal_id", 1), ("created_at", -1)])
+        await db.audit_log.create_index("seq", unique=True)
+        await db.audit_log.create_index([("actor_id", 1), ("timestamp", -1)])
+        await db.audit_log.create_index([("action", 1), ("timestamp", -1)])
+        await db.events.create_index([("owner_id", 1), ("entity_id", 1), ("created_at", -1)])
+        await db.events.create_index([("owner_id", 1), ("event_type", 1), ("created_at", -1)])
+        await db.client_memory.create_index([("owner_id", 1), ("client_id", 1)], unique=True)
+        await db.settings.create_index("id", unique=True)
+        await migrate_legacy_fields()
+    await load_signing_key()
+    await seed_admin()
+    logger.info("Revora ready (engine=%s, audit key fp=%s).",
+                "postgres" if is_postgres() else "mongo", get_public_key_fp())
 
 
 @app.on_event("shutdown")
