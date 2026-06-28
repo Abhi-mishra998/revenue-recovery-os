@@ -12,6 +12,7 @@ from typing import Optional
 
 from .client import NoApiKeyError, MalformedOutputError, generate_json, generate_text  # noqa: F401
 from . import prompts
+from . import redact as redact_mod
 from .schemas import FollowUpDraft
 
 
@@ -58,16 +59,20 @@ async def generate_proposal_followup(
         recipient_company=recipient_company, industry=industry,
         title=title, value_inr=value_inr, days_silent=days_silent,
     )
-    system, user = template.render(context=context)
+    # PII redaction — emails/phones/PAN/GSTIN in title/notes never reach the LLM.
+    redacted_context, token_map = redact_mod.redact(context)
+    system, user = template.render(context=redacted_context)
 
     draft: FollowUpDraft = await generate_json(
         system=system, user=user, schema=template.schema,
         provider=provider, model=model, session_id=f"fu-{uuid.uuid4()}",
     )
+
+    # Rehydrate any tokens the model echoed back (rare — names usually aren't PII).
     return {
-        "whatsapp_text": draft.whatsapp_text.strip(),
-        "email_subject": draft.email_subject.strip(),
-        "email_body": draft.email_body.strip(),
+        "whatsapp_text": redact_mod.rehydrate(draft.whatsapp_text, token_map).strip(),
+        "email_subject": redact_mod.rehydrate(draft.email_subject, token_map).strip(),
+        "email_body":    redact_mod.rehydrate(draft.email_body,    token_map).strip(),
         "prompt_ref": template.ref,
     }
 
