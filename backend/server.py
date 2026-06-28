@@ -485,25 +485,37 @@ async def create_activity(payload: ActivityCreate, user: dict = Depends(get_curr
 async def dashboard_summary(user: dict = Depends(get_current_user)):
     proposals = await db.proposals.find({"owner_id": user["id"]}, {"_id": 0}).to_list(10000)
     invoices = await db.invoices.find({"owner_id": user["id"]}, {"_id": 0}).to_list(10000)
+    clients_map = {c["id"]: c async for c in db.clients.find({"owner_id": user["id"]}, {"_id": 0})}
 
     total_pipeline = 0.0
+    active_inr = 0.0
+    cold_inr = 0.0
+    dead_inr = 0.0
     cold_count = 0
-    revenue_at_risk = 0.0
-    by_status = {"active": 0, "cold": 0, "dead": 0}
-    by_stage = {"sent": 0, "negotiating": 0, "won": 0, "lost": 0}
+    by_status_count = {"active": 0, "cold": 0, "dead": 0}
+    by_stage_count = {"sent": 0, "negotiating": 0, "won": 0, "lost": 0}
+    at_risk_candidates = []
 
     for p in proposals:
         stage = p.get("stage", "sent")
-        by_stage[stage] = by_stage.get(stage, 0) + 1
+        by_stage_count[stage] = by_stage_count.get(stage, 0) + 1
         if stage in ("sent", "negotiating"):
-            total_pipeline += float(p["value_inr"])
+            value = float(p["value_inr"])
+            total_pipeline += value
             s = compute_proposal_status(p["last_contact_date"])
-            by_status[s] = by_status.get(s, 0) + 1
-            if s == "cold":
+            by_status_count[s] = by_status_count.get(s, 0) + 1
+            if s == "active":
+                active_inr += value
+            elif s == "cold":
+                cold_inr += value
                 cold_count += 1
-                revenue_at_risk += float(p["value_inr"])
+                at_risk_candidates.append((p, s, value))
             elif s == "dead":
-                revenue_at_risk += float(p["value_inr"])
+                dead_inr += value
+                at_risk_candidates.append((p, s, value))
+
+    revenue_at_risk = cold_inr + dead_inr
+    estimated_recoverable = round(revenue_at_risk * 0.25)
 
     overdue_count = 0
     overdue_amount = 0.0
@@ -513,14 +525,41 @@ async def dashboard_summary(user: dict = Depends(get_current_user)):
             overdue_count += 1
             overdue_amount += float(inv["amount_inr"])
 
+    # Top 5 at-risk proposals: rank by value × days_silent (urgency).
+    def _rank(item):
+        p, _, v = item
+        d = max(1, days_since(p["last_contact_date"]))
+        return v * d
+
+    at_risk_candidates.sort(key=_rank, reverse=True)
+    top_at_risk = []
+    for p, status, value in at_risk_candidates[:5]:
+        c = clients_map.get(p["client_id"], {})
+        top_at_risk.append({
+            "id": p["id"],
+            "title": p["title"],
+            "value_inr": value,
+            "status": status,
+            "days_silent": days_since(p["last_contact_date"]),
+            "stage": p.get("stage", "sent"),
+            "client_company_name": c.get("company_name", "Unknown"),
+            "client_contact_name": c.get("contact_name", ""),
+        })
+
     return {
         "total_pipeline_inr": total_pipeline,
+        "active_inr": active_inr,
+        "cold_inr": cold_inr,
+        "dead_inr": dead_inr,
         "cold_proposals_count": cold_count,
         "overdue_invoices_count": overdue_count,
         "overdue_invoices_inr": overdue_amount,
         "revenue_at_risk_inr": revenue_at_risk,
-        "by_status": by_status,
-        "by_stage": by_stage,
+        "estimated_recoverable_inr": estimated_recoverable,
+        "recoverable_assumption_pct": 25,
+        "by_status": by_status_count,
+        "by_stage": by_stage_count,
+        "top_at_risk": top_at_risk,
     }
 
 
