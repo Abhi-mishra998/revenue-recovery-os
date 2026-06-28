@@ -1,0 +1,9 @@
+# Runtime-only deps. Not on public PyPI — install from the Emergent private
+# index in production (or whichever LLM provider you actually use).
+#
+#   pip install -r requirements.txt -r requirements-runtime.txt
+#
+# Tests don't need this — the AI layer is exercised through a StubProvider
+# registered in the test (see tests/test_ai_e2e.py). CI installs requirements.txt
+# only.
+emergentintegrations==0.2.0
