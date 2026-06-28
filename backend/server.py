@@ -24,6 +24,7 @@ from slowapi.util import get_remote_address
 
 from services.seed import seed_demo_for_owner
 from services.ai import generate_proposal_followup, NoApiKeyError
+from services.audit import append_audit, load_signing_key, verify_chain, get_public_key_fp
 
 # ---------- MongoDB ----------
 mongo_url = os.environ['MONGO_URL']
@@ -806,9 +807,14 @@ async def on_startup():
     await db.invoices.create_index([("owner_id", 1)])
     await db.activities.create_index([("owner_id", 1), ("created_at", -1)])
     await db.followups.create_index([("owner_id", 1), ("proposal_id", 1), ("created_at", -1)])
+    await db.audit_log.create_index("seq", unique=True)
+    await db.audit_log.create_index([("actor_id", 1), ("timestamp", -1)])
+    await db.audit_log.create_index([("action", 1), ("timestamp", -1)])
+    await db.settings.create_index("id", unique=True)
     await migrate_legacy_fields()
+    await load_signing_key(db)
     await seed_admin()
-    logger.info("Revora ready.")
+    logger.info("Revora ready (audit key fp=%s).", get_public_key_fp())
 
 
 @app.on_event("shutdown")
