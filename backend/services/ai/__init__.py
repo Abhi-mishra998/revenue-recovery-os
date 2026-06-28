@@ -11,6 +11,7 @@ import uuid
 from typing import Optional
 
 from .client import NoApiKeyError, MalformedOutputError, generate_json, generate_text  # noqa: F401
+from .guardrail import GuardrailViolation, enforce_followup  # noqa: F401
 from . import prompts
 from . import redact as redact_mod
 from .schemas import FollowUpDraft
@@ -68,11 +69,18 @@ async def generate_proposal_followup(
         provider=provider, model=model, session_id=f"fu-{uuid.uuid4()}",
     )
 
-    # Rehydrate any tokens the model echoed back (rare — names usually aren't PII).
+    # Rehydrate PII first, then guardrail-check the user-visible version.
+    rehydrated = FollowUpDraft(
+        whatsapp_text=redact_mod.rehydrate(draft.whatsapp_text, token_map).strip(),
+        email_subject=redact_mod.rehydrate(draft.email_subject, token_map).strip(),
+        email_body=redact_mod.rehydrate(draft.email_body, token_map).strip(),
+    )
+    enforce_followup(rehydrated)  # raises GuardrailViolation on bad content
+
     return {
-        "whatsapp_text": redact_mod.rehydrate(draft.whatsapp_text, token_map).strip(),
-        "email_subject": redact_mod.rehydrate(draft.email_subject, token_map).strip(),
-        "email_body":    redact_mod.rehydrate(draft.email_body,    token_map).strip(),
+        "whatsapp_text": rehydrated.whatsapp_text,
+        "email_subject": rehydrated.email_subject,
+        "email_body":    rehydrated.email_body,
         "prompt_ref": template.ref,
     }
 

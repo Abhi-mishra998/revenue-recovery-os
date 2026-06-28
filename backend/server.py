@@ -23,7 +23,7 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
 from services.seed import seed_demo_for_owner
-from services.ai import generate_proposal_followup, NoApiKeyError
+from services.ai import generate_proposal_followup, NoApiKeyError, GuardrailViolation, MalformedOutputError
 from services.audit import append_audit, load_signing_key, verify_chain, get_public_key_fp
 
 # ---------- MongoDB ----------
@@ -761,6 +761,10 @@ async def generate_followup_for_proposal(request: Request, proposal_id: str, use
         )
     except NoApiKeyError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except GuardrailViolation as e:
+        raise HTTPException(status_code=422, detail=f"Draft failed safety checks: {e}. Please regenerate.")
+    except MalformedOutputError as e:
+        raise HTTPException(status_code=502, detail=f"Model returned invalid output: {e}")
     except Exception as e:
         logger.exception("AI generation failed")
         raise HTTPException(status_code=502, detail=f"AI generation failed: {e}")
