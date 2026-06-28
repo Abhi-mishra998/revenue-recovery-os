@@ -123,6 +123,15 @@ def public_user(u: dict) -> dict:
     }
 
 
+def require_admin(user: dict = Depends(get_current_user)) -> dict:
+    """Authorize the configured ADMIN_EMAIL only. ponytail: single-admin model
+    is enough for now; switch to a roles collection when there's a second admin."""
+    admin_email = (os.environ.get("ADMIN_EMAIL") or "").strip().lower()
+    if not admin_email or user["email"].lower() != admin_email:
+        raise HTTPException(status_code=403, detail="Admin only")
+    return user
+
+
 async def assert_owns_client(client_id: str, user: dict) -> None:
     if not await db.clients.find_one({"id": client_id, "owner_id": user["id"]}, {"_id": 1}):
         raise HTTPException(404, "Client not found")
@@ -663,6 +672,32 @@ async def dashboard_summary(user: dict = Depends(get_current_user)):
         "by_status": by_status_count,
         "by_stage": by_stage_count,
         "top_at_risk": top_at_risk,
+    }
+
+
+# ---------- Admin: audit log ----------
+@api.get("/admin/audit-log/verify")
+async def admin_audit_verify(limit: Optional[int] = None, admin: dict = Depends(require_admin)):
+    """Re-walk the audit chain and report hash/signature integrity."""
+    return await verify_chain(db, limit=limit)
+
+
+@api.get("/admin/audit-log")
+async def admin_audit_list(
+    page: int = 1, page_size: int = 50, admin: dict = Depends(require_admin),
+):
+    """Paginated read of audit records, newest first."""
+    page = max(1, page)
+    page_size = max(1, min(500, page_size))
+    skip = (page - 1) * page_size
+    total = await db.audit_log.count_documents({})
+    rows = await db.audit_log.find(
+        {}, {"_id": 0},
+    ).sort("seq", -1).skip(skip).limit(page_size).to_list(page_size)
+    return {
+        "page": page, "page_size": page_size, "total": total,
+        "public_key_fp": get_public_key_fp(),
+        "records": rows,
     }
 
 
