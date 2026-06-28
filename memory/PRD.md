@@ -1,66 +1,72 @@
 # Revora — Revenue Recovery OS — PRD
 
-## Original problem statement
-B2B service businesses in India (consultants, IT/dev agencies, CA firms, design studios)
-lose money when proposal & invoice follow-up slips into WhatsApp threads + Excel.
-ByteHubble is the first user. We need a daily operator console that surfaces what's
-going cold, what to chase today, how much ₹ is recoverable, plus AI-drafted (copy-only)
-WhatsApp + email follow-ups, an invoice tracker with AI reminders, and a client
-activity log.
+## Original problem statement (prompt 1)
+Build a Revenue Recovery OS for Indian B2B service businesses (consultants, agencies, CA firms, design studios). First user = ByteHubble. React + FastAPI + MongoDB. Google login (Emergent playbook) + email/password fallback. Every user sees only their own data.
 
-## Architecture decisions
-- Backend: FastAPI + MongoDB (motor) + JWT bearer auth + bcrypt
-- AI: Claude Sonnet 4.5 via Emergent Universal LLM key (emergentintegrations)
-- Frontend: React + react-router + axios + shadcn/ui + sonner + lucide-react
-- Fonts: Cormorant Garamond (display) + Outfit (UI) + JetBrains Mono (numbers)
-- INR formatting: Indian numbering system (1,00,000 lakhs / 1,25,00,000 crores) + compact ₹ L / ₹ Cr for hero
-- Auth model: single-user-per-tenant; all data scoped by owner_id
+## Locked-in models (prompt 1 — schema v2)
+- **User**: name, email, auth_provider
+- **Client**: company_name, contact_name, email, phone, whatsapp, industry, language (default "English"), notes
+- **Proposal**: client_id, title, value_inr, sent_date, last_contact_date, status (auto active/cold/dead), stage (sent/negotiating/won/lost), notes
+- **Invoice**: client_id, invoice_no, amount_inr, due_date, paid_date, status (auto paid/unpaid/overdue), days_overdue (auto), notes
+- **Activity**: client_id, related_type, related_id, channel, direction, summary, created_at
 
-## User personas
-- Founder/Operator at a 5-30 person Indian agency (primary)
-- AR/finance assistant who chases invoices (secondary)
+**Rule**: status + days_overdue are computed from dates, never typed by the user.
 
-## Core requirements (static)
-1. Proposal dashboard with auto status
-2. Status logic: Active (≤7d), Cold (≤21d), Dead (>21d) by days-since-contact
-3. AI follow-up drafts (WhatsApp + Email) — copy to clipboard only
-4. Revenue-at-Risk view + Recoverable ₹
-5. Today's Action List (ranked by value × days-silent)
-6. Invoice tracker + AI reminder
-7. Client activity log
+## Architecture rules (prompt 1, locked)
+1. Don't change DB/framework/auth after prompt 1
+2. Don't rename models
+3. Don't touch code outside the named feature
+4. One feature per prompt
+5. Backward-compatible
+6. Copy-to-send only (no auto-send anywhere)
+7. Stop for review after each prompt
 
-## Implemented (2026-02-XX)
-- JWT email/password auth with bcrypt, /api/auth/login, /api/auth/me, /api/auth/register
-- Seed admin user founder@bytehubble.com + 12 demo clients, 15 proposals, 10 invoices, ~35 activities
-- Proposals CRUD + touch (mark followed-up) + auto status
-- Invoices CRUD + mark-paid + auto status (due/overdue/critical/paid)
-- Dashboard summary + ranked Today's Action List with urgency scoring
-- AI draft endpoint (Claude Sonnet 4.5 via Emergent key): WhatsApp, Email, Invoice-reminder × 3 tones (gentle/firm/final)
-- Activity timeline per client (auto-logged on every action)
-- Beautiful editorial-fintech UI: cream paper bg + serif hero numbers + status pills + warm Indian-business voice
-- 14/14 backend pytest passing; 100% frontend critical flows passing
+## Implemented (prompt 1 — 2026-02)
 
-## Architecture shims for Opus export (2026-02-XX, scope-locked)
-- `backend/services/ai.py` — provider-abstracted AI layer. `PROVIDERS` dict maps name → handler. Default `anthropic_emergent` (uses EMERGENT_LLM_KEY). Swap providers by adding entries — no other code changes needed.
-- `backend/services/seed.py` — extracted realistic ByteHubble seed (12 clients across verticals, 15 proposals, 10 invoices, varied activities). `reset_demo_data_for_owner()` + `seed_demo_for_owner()` are reusable.
-- `backend/scripts/reset_demo.py` — one-command wipe + reseed (or `--wipe-only`). Preserves the user account; touches only demo content for the target owner.
+### Auth
+- Google OAuth (Emergent playbook): /login → "Continue with Google" → emergentagent → /?session_id=… → POST /api/auth/google/session → JWT bearer
+- Email/password fallback: /api/auth/login, /api/auth/register, /api/auth/me
+- JWT bearer in localStorage as `revora_token`
+- Seed admin: founder@bytehubble.com / ByteHubble@2025
 
-## P0 backlog (next)
-- Real ₹ recovered counter (when cold proposal moves to active/won)
-- Daily summary email digest of today's action list
+### Backend (FastAPI + MongoDB)
+- All endpoints scoped by owner_id (per-user authorization on every query)
+- CRUD: /api/clients, /api/proposals, /api/invoices, /api/activities
+- /api/dashboard/summary returns the 4 dashboard metrics
+- Auto status compute: active ≤7d, cold ≤21d, dead >21d (proposals); paid/unpaid/overdue (invoices)
+- One-time legacy field migration runs on startup (renames v1 fields to v2 idempotently)
+- Reset/reseed: `python scripts/reset_demo.py`
 
-## P1 backlog
-- Multi-user / team support
-- Per-client custom follow-up cadence
-- CSV import for existing proposals / invoices
-- Drag-and-drop reorder on action list
+### Frontend (React + react-router 7)
+- Indigo #4338ca primary, Teal #0d9488 accent, light theme, card-based
+- 5 screens: Dashboard, Proposals (+ detail), Clients (+ detail), Invoices
+- Status badges: green=active/paid, amber=cold, red=dead/overdue
+- ₹ with Indian commas (1,00,000 / 1.25 Cr compact)
+- Responsive sidebar → hamburger drawer on mobile (<768px)
 
-## P2 backlog
-- Native WhatsApp Cloud API send (currently copy-only)
-- Predictive likelihood-to-close ML
-- Meeting transcription / call notes
-- Multi-currency support
+### Seed (12 clients / 14 proposals / 10 invoices / 10 activities)
+- Realistic Indian B2B mix across verticals
+- Dashboard reads: ₹37.75 L pipeline · 6 cold · 6 overdue (₹11.57 L) · ₹27.15 L at risk
 
-## Next action items
-- Validate with ByteHubble for 1 week, capture ₹ actually recovered
-- Build the daily email digest + the "₹ recovered this month" tracker for the contest demo
+### Tests
+- 15/15 backend pytest pass — auth, data isolation, dashboard math, CRUD, status compute, Google session 401
+- 100% frontend Playwright pass on critical flows
+- Test file: /app/backend/tests/test_revora_api.py
+
+## Optional polish flagged by testing agent (NOT applied — awaiting your direction)
+1. Map upstream Emergent failure on Google session to 401 instead of 502 (cosmetic)
+2. Split server.py (~628 LOC) into routes/{auth,clients,proposals,invoices}.py
+3. Use IST day boundaries for status flips (India-first product)
+4. Dev-only React `<span>` in `<option>` warning from Emergent's visual-editor instrumentation (not a real bug)
+
+## Out of scope (deliberately not built — awaiting future prompts)
+- AI follow-up drafts (drafts WERE in earlier iteration, removed for prompt 1 scope)
+- Today's Action List
+- Activity timeline UI on client detail
+- FollowUp model persistence
+- Bulk actions, CSV import, audit log, ML
+
+## Backlog
+- **P0**: ₹ Recovered counter, FollowUp model + persistence, AI draft generation
+- **P1**: CSV import, daily email digest, IST-aware status, dark mode
+- **P2**: WhatsApp Cloud API send, predictive ML
