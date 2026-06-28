@@ -50,7 +50,8 @@ export function AuthProvider({ children }) {
     return data.user;
   };
 
-  const logout = () => {
+  const logout = async () => {
+    try { await api.post("/auth/logout"); } catch { /* token may already be invalid; clearing locally is enough */ }
     setToken(null);
     setUser(null);
   };

@@ -83,10 +83,11 @@ def verify_password(p: str, h: str) -> bool:
         return False
 
 
-def create_access_token(user_id: str, email: str) -> str:
+def create_access_token(user_id: str, email: str, token_version: int = 0) -> str:
     payload = {
         "sub": user_id,
         "email": email,
+        "tv": token_version,
         "exp": now_utc() + timedelta(days=7),
         "type": "access",
     }
@@ -105,6 +106,8 @@ async def get_current_user(creds: Optional[HTTPAuthorizationCredentials] = Depen
     user = await db.users.find_one({"id": payload["sub"]})
     if not user:
         raise HTTPException(status_code=401, detail="User not found")
+    if int(payload.get("tv", 0)) != int(user.get("token_version", 0)):
+        raise HTTPException(status_code=401, detail="Token revoked")
     user.pop("_id", None)
     user.pop("password_hash", None)
     return user
@@ -302,10 +305,11 @@ async def register(request: Request, req: RegisterReq):
         "name": req.name,
         "auth_provider": "email",
         "password_hash": hash_password(req.password),
+        "token_version": 0,
         "created_at": now_utc().isoformat(),
     }
     await db.users.insert_one(doc)
-    token = create_access_token(user_id, email)
+    token = create_access_token(user_id, email, 0)
     return {"token": token, "user": public_user(doc)}
 
 
@@ -316,7 +320,7 @@ async def login(request: Request, req: LoginReq):
     user = await db.users.find_one({"email": email})
     if not user or not verify_password(req.password, user.get("password_hash", "")):
         raise HTTPException(status_code=401, detail="Invalid email or password")
-    token = create_access_token(user["id"], email)
+    token = create_access_token(user["id"], email, user.get("token_version", 0))
     return {"token": token, "user": public_user(user)}
 
 
@@ -351,21 +355,29 @@ async def google_session(request: Request, req: GoogleSessionReq):
             "name": name,
             "auth_provider": "google",
             "password_hash": None,
+            "token_version": 0,
             "created_at": now_utc().isoformat(),
         }
         await db.users.insert_one(user.copy())
-    else:
-        # Backfill auth_provider if missing
-        if not user.get("auth_provider"):
-            await db.users.update_one({"id": user["id"]}, {"$set": {"auth_provider": user.get("auth_provider", "google")}})
+    elif user.get("auth_provider") != "google":
+        # Refuse silent account linking — a Google account for a password user's
+        # email would otherwise take over that account.
+        raise HTTPException(status_code=409, detail="This email is registered with a password. Please sign in with your password.")
 
-    token = create_access_token(user["id"], email)
+    token = create_access_token(user["id"], email, user.get("token_version", 0))
     return {"token": token, "user": public_user(user)}
 
 
 @api.get("/auth/me")
 async def me(user: dict = Depends(get_current_user)):
     return public_user(user)
+
+
+@api.post("/auth/logout", status_code=204)
+async def logout(user: dict = Depends(get_current_user)):
+    """Revoke every outstanding token for this user by bumping token_version."""
+    await db.users.update_one({"id": user["id"]}, {"$inc": {"token_version": 1}})
+    return None
 
 
 # ---------- Clients ----------
