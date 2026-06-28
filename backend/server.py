@@ -26,6 +26,7 @@ from slowapi.util import get_remote_address
 from services.seed import seed_demo_for_owner
 from services.ai import generate_proposal_followup, NoApiKeyError, GuardrailViolation, MalformedOutputError
 from services.audit import append_audit, load_signing_key, verify_chain, get_public_key_fp
+from services.events import emit_event
 
 # ---------- MongoDB ----------
 mongo_url = os.environ['MONGO_URL']
@@ -479,6 +480,9 @@ async def create_proposal(payload: ProposalCreate, user: dict = Depends(get_curr
     await db.proposals.insert_one(doc.copy())
     await append_audit(db, action="proposal.create", actor_id=user["id"], actor_email=user["email"],
                        resource_type="proposal", resource_id=doc["id"], payload=payload.model_dump())
+    await emit_event(db, owner_id=user["id"], event_type="proposal.created",
+                     entity_type="proposal", entity_id=doc["id"], source="user",
+                     metadata={"value_inr": doc["value_inr"], "stage": doc["stage"], "client_id": doc["client_id"]})
     return serialize_proposal({k: v for k, v in doc.items() if k != "_id"})
 
 
@@ -506,12 +510,35 @@ async def update_proposal(proposal_id: str, payload: ProposalUpdate, user: dict 
     updates = {k: v for k, v in payload.model_dump().items() if v is not None}
     if not updates:
         raise HTTPException(400, "Nothing to update")
-    res = await db.proposals.update_one({"id": proposal_id, "owner_id": user["id"]}, {"$set": updates})
-    if res.matched_count == 0:
+
+    # If stage is changing, capture the prior + stamp outcome_at on terminal transitions.
+    prior = await db.proposals.find_one({"id": proposal_id, "owner_id": user["id"]}, {"_id": 0})
+    if not prior:
         raise HTTPException(404, "Proposal not found")
+    prior_stage = prior.get("stage")
+    new_stage = updates.get("stage")
+    stage_changing = new_stage and new_stage != prior_stage
+    if stage_changing and new_stage in ("won", "lost"):
+        updates["outcome_at"] = now_utc().isoformat()
+
+    await db.proposals.update_one({"id": proposal_id, "owner_id": user["id"]}, {"$set": updates})
     p = await db.proposals.find_one({"id": proposal_id, "owner_id": user["id"]}, {"_id": 0})
     await append_audit(db, action="proposal.update", actor_id=user["id"], actor_email=user["email"],
                        resource_type="proposal", resource_id=proposal_id, payload=updates)
+
+    if stage_changing:
+        sent_iso = prior.get("sent_date")
+        days_to_close = days_since(sent_iso) if sent_iso else None
+        await emit_event(db, owner_id=user["id"], event_type="proposal.stage_changed",
+                         entity_type="proposal", entity_id=proposal_id, source="user",
+                         prior_value=prior_stage, new_value=new_stage,
+                         metadata={"value_inr": prior.get("value_inr"), "client_id": prior.get("client_id")})
+        if new_stage in ("won", "lost"):
+            await emit_event(db, owner_id=user["id"], event_type=f"proposal.{new_stage}",
+                             entity_type="proposal", entity_id=proposal_id, source="user",
+                             metadata={"value_inr": prior.get("value_inr"),
+                                       "days_to_close": days_to_close,
+                                       "client_id": prior.get("client_id")})
     return serialize_proposal(p)
 
 
@@ -546,6 +573,10 @@ async def create_invoice(payload: InvoiceCreate, user: dict = Depends(get_curren
     await db.invoices.insert_one(doc.copy())
     await append_audit(db, action="invoice.create", actor_id=user["id"], actor_email=user["email"],
                        resource_type="invoice", resource_id=doc["id"], payload=payload.model_dump())
+    await emit_event(db, owner_id=user["id"], event_type="invoice.created",
+                     entity_type="invoice", entity_id=doc["id"], source="user",
+                     metadata={"amount_inr": doc["amount_inr"], "due_date": doc["due_date"],
+                               "client_id": doc["client_id"]})
     return serialize_invoice({k: v for k, v in doc.items() if k != "_id"})
 
 
@@ -562,12 +593,23 @@ async def update_invoice(invoice_id: str, payload: InvoiceUpdate, user: dict = D
     updates = {k: v for k, v in payload.model_dump().items() if v is not None}
     if not updates:
         raise HTTPException(400, "Nothing to update")
-    res = await db.invoices.update_one({"id": invoice_id, "owner_id": user["id"]}, {"$set": updates})
-    if res.matched_count == 0:
+    prior = await db.invoices.find_one({"id": invoice_id, "owner_id": user["id"]}, {"_id": 0})
+    if not prior:
         raise HTTPException(404, "Invoice not found")
+    became_paid = (not prior.get("paid_date")) and updates.get("paid_date")
+
+    await db.invoices.update_one({"id": invoice_id, "owner_id": user["id"]}, {"$set": updates})
     inv = await db.invoices.find_one({"id": invoice_id, "owner_id": user["id"]}, {"_id": 0})
     await append_audit(db, action="invoice.update", actor_id=user["id"], actor_email=user["email"],
                        resource_type="invoice", resource_id=invoice_id, payload=updates)
+
+    if became_paid:
+        _, days_overdue_at_payment = compute_invoice_status_and_overdue({**prior, "paid_date": None})
+        await emit_event(db, owner_id=user["id"], event_type="invoice.payment_received",
+                         entity_type="invoice", entity_id=invoice_id, source="user",
+                         metadata={"amount_inr": prior.get("amount_inr"),
+                                   "days_overdue_at_payment": days_overdue_at_payment,
+                                   "client_id": prior.get("client_id")})
     return serialize_invoice(inv)
 
 
@@ -578,6 +620,23 @@ async def delete_invoice(invoice_id: str, user: dict = Depends(get_current_user)
         await append_audit(db, action="invoice.delete", actor_id=user["id"], actor_email=user["email"],
                            resource_type="invoice", resource_id=invoice_id)
     return {"ok": True}
+
+
+# ---------- Events (append-only product analytics) ----------
+@api.get("/events")
+async def list_events(
+    entity_type: Optional[str] = None, entity_id: Optional[str] = None,
+    event_type: Optional[str] = None, limit: int = 200,
+    user: dict = Depends(get_current_user),
+):
+    """Read-only tail of the events stream, scoped to the caller's tenant."""
+    limit = max(1, min(1000, limit))
+    q: dict = {"owner_id": user["id"]}
+    if entity_type: q["entity_type"] = entity_type
+    if entity_id:   q["entity_id"] = entity_id
+    if event_type:  q["event_type"] = event_type
+    rows = await db.events.find(q, {"_id": 0}).sort("created_at", -1).limit(limit).to_list(limit)
+    return rows
 
 
 # ---------- Activities ----------
@@ -812,6 +871,13 @@ async def generate_followup_for_proposal(request: Request, proposal_id: str, use
                                 "prompt_ref": result.get("prompt_ref"),
                                 "route_ref": result.get("route_ref"),
                                 "latency_ms": latency_ms})
+    await emit_event(db, owner_id=user["id"], event_type="followup.generated",
+                     entity_type="proposal", entity_id=proposal_id, source="system",
+                     metadata={"generation_id": generation_id,
+                               "prompt_ref": result.get("prompt_ref"),
+                               "route_ref": result.get("route_ref"),
+                               "latency_ms": latency_ms,
+                               "client_id": p["client_id"]})
 
     return {
         "whatsapp": {"id": wa_id, "text": result["whatsapp_text"]},
@@ -935,6 +1001,8 @@ async def on_startup():
     await db.audit_log.create_index("seq", unique=True)
     await db.audit_log.create_index([("actor_id", 1), ("timestamp", -1)])
     await db.audit_log.create_index([("action", 1), ("timestamp", -1)])
+    await db.events.create_index([("owner_id", 1), ("entity_id", 1), ("created_at", -1)])
+    await db.events.create_index([("owner_id", 1), ("event_type", 1), ("created_at", -1)])
     await db.settings.create_index("id", unique=True)
     await migrate_legacy_fields()
     await load_signing_key(db)
