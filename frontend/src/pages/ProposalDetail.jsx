@@ -57,10 +57,17 @@ export default function ProposalDetail() {
       } catch { /* tolerate */ }
       toast.success("Drafts ready");
     } catch (e) {
+      const status = e.response?.status;
       const detail = e.response?.data?.detail;
-      const msg = typeof detail === "string" ? detail : "Could not generate drafts";
-      setGenError(msg);
-      toast.error(msg);
+      // 503 + { code: 'llm_unavailable' } → calm 'AI busy' panel + retry, no red toast.
+      const isUnavailable = status === 503 && (detail?.code === "llm_unavailable");
+      const msg = isUnavailable
+        ? (detail.message || "AI provider is busy. Please try again in a minute.")
+        : typeof detail === "string"
+          ? detail
+          : detail?.message || "Could not generate drafts";
+      setGenError({ msg, kind: isUnavailable ? "unavailable" : "error" });
+      if (!isUnavailable) toast.error(msg);
     } finally {
       setGenLoading(false);
     }
@@ -137,11 +144,32 @@ export default function ProposalDetail() {
             </button>
           </div>
 
-          {genError && (
+          {genError?.kind === "unavailable" && (
+            <div
+              className="mt-4 p-4 rounded-md border border-sky-200 bg-sky-50 text-sm text-sky-900 flex items-start gap-3"
+              data-testid="genfollowup-unavailable"
+            >
+              <Sparkles className="w-4 h-4 mt-0.5 shrink-0" />
+              <div className="flex-1">
+                <div className="font-medium">AI is busy right now</div>
+                <div className="text-[12.5px] text-sky-800 mt-0.5">{genError.msg}</div>
+              </div>
+              <button
+                onClick={generate}
+                disabled={genLoading}
+                className="cta-primary text-xs"
+                data-testid="genfollowup-retry"
+              >
+                {genLoading ? "Retrying…" : "Retry"}
+              </button>
+            </div>
+          )}
+
+          {genError && genError.kind !== "unavailable" && (
             <div className="mt-4 p-3 rounded-md border border-amber-200 bg-amber-50 text-sm text-amber-900 flex items-start gap-2" data-testid="genfollowup-error">
               <KeyRound className="w-4 h-4 mt-0.5 shrink-0" />
               <div>
-                <div className="font-medium">{genError}</div>
+                <div className="font-medium">{genError.msg}</div>
                 <div className="text-xs text-amber-800 mt-1">
                   Add an API key (Gemini, OpenAI or Anthropic) in settings to enable AI drafts.
                 </div>
