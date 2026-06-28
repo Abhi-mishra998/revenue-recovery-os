@@ -1,19 +1,27 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "@/lib/api";
 import { inr, dateShort, dateForInput } from "@/lib/format";
 import { StatusBadge, StageBadge } from "@/components/StatusPill";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Plus, Trash2, Pencil } from "lucide-react";
+import { Plus, Trash2, Pencil, Search, ArrowUpDown, ArrowDown, ArrowUp } from "lucide-react";
 import { toast } from "sonner";
 
 const STAGE_OPTIONS = ["sent", "negotiating", "won", "lost"];
+const STATUS_FILTERS = ["all", "active", "cold", "dead"];
 
 export default function Proposals() {
   const nav = useNavigate();
   const [rows, setRows] = useState([]);
   const [clients, setClients] = useState([]);
-  const [editing, setEditing] = useState(null); // proposal object or { __new: true }
+  const [editing, setEditing] = useState(null); // proposal or { __new: true }
+
+  // Toolbar state
+  const [query, setQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [sortKey, setSortKey] = useState("days"); // 'days' | 'value'
+  const [sortDir, setSortDir] = useState("desc"); // 'asc' | 'desc'
+
   const load = async () => {
     const [pr, cl] = await Promise.all([api.get("/proposals"), api.get("/clients")]);
     setRows(pr.data);
@@ -29,38 +37,111 @@ export default function Proposals() {
     load();
   };
 
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    const list = rows.filter((r) => {
+      if (statusFilter !== "all" && r.status !== statusFilter) return false;
+      if (!q) return true;
+      return (
+        (r.title || "").toLowerCase().includes(q) ||
+        (r.client_company_name || "").toLowerCase().includes(q) ||
+        (r.client_contact_name || "").toLowerCase().includes(q)
+      );
+    });
+    const keyFn = sortKey === "value"
+      ? (x) => Number(x.value_inr || 0)
+      : (x) => Number(x.days_silent || 0);
+    const sorted = [...list].sort((a, b) => keyFn(a) - keyFn(b));
+    if (sortDir === "desc") sorted.reverse();
+    return sorted;
+  }, [rows, query, statusFilter, sortKey, sortDir]);
+
+  const toggleSort = (key) => {
+    if (sortKey === key) setSortDir(sortDir === "asc" ? "desc" : "asc");
+    else { setSortKey(key); setSortDir("desc"); }
+  };
+  const sortIcon = (key) => {
+    if (sortKey !== key) return <ArrowUpDown className="w-3 h-3 opacity-50" />;
+    return sortDir === "desc" ? <ArrowDown className="w-3 h-3" /> : <ArrowUp className="w-3 h-3" />;
+  };
+
   return (
     <div className="p-5 md:p-8 max-w-[1400px]" data-testid="proposals-page">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <div className="text-[11px] uppercase tracking-[0.22em] text-slate-500 font-semibold">Pipeline</div>
           <h1 className="text-3xl md:text-4xl font-semibold mt-1.5 text-slate-900">Proposals</h1>
-          <p className="text-sm text-slate-500 mt-1.5">All proposals with auto status based on days since last contact.</p>
+          <p className="text-sm text-slate-500 mt-1.5">Auto status: Active ≤ 7d · Cold 7–14d · Dead 15d+ since last contact.</p>
         </div>
         <button className="cta-primary" onClick={() => setEditing({ __new: true })} data-testid="new-proposal-btn">
           <Plus className="w-4 h-4" /> New proposal
         </button>
       </div>
 
-      <div className="revora-card overflow-hidden mt-6">
+      {/* Toolbar: search + filters */}
+      <div className="mt-6 flex flex-wrap items-center gap-3" data-testid="proposals-toolbar">
+        <div className="relative flex-1 min-w-[220px] max-w-md">
+          <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+          <input
+            type="search"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search by client or title…"
+            className="field pl-9"
+            data-testid="proposals-search"
+          />
+        </div>
+        <div className="flex items-center gap-1.5" data-testid="proposals-status-filters">
+          {STATUS_FILTERS.map((s) => (
+            <button
+              key={s}
+              onClick={() => setStatusFilter(s)}
+              data-testid={`filter-${s}`}
+              className={`text-xs px-3 py-1.5 rounded-full border transition capitalize ${
+                statusFilter === s
+                  ? "bg-indigo-700 text-white border-indigo-700"
+                  : "bg-white border-slate-200 text-slate-700 hover:bg-indigo-50 hover:border-indigo-200 hover:text-indigo-700"
+              }`}
+            >
+              {s}
+            </button>
+          ))}
+        </div>
+        <div className="ml-auto text-xs text-slate-500" data-testid="proposals-count">
+          {filtered.length} of {rows.length}
+        </div>
+      </div>
+
+      <div className="revora-card overflow-hidden mt-4">
         <div className="overflow-x-auto">
-          <table className="w-full text-sm min-w-[820px]">
+          <table className="w-full text-sm min-w-[900px]">
             <thead>
               <tr className="text-left text-[11px] uppercase tracking-[0.16em] text-slate-500 border-b border-slate-200 font-semibold">
                 <th className="px-4 py-3">Client</th>
                 <th className="px-4 py-3">Title</th>
-                <th className="px-4 py-3">Value</th>
+                <th className="px-4 py-3">
+                  <button onClick={() => toggleSort("value")} className="inline-flex items-center gap-1.5 uppercase tracking-[0.16em]" data-testid="sort-value">
+                    Value {sortIcon("value")}
+                  </button>
+                </th>
                 <th className="px-4 py-3">Last contact</th>
+                <th className="px-4 py-3">
+                  <button onClick={() => toggleSort("days")} className="inline-flex items-center gap-1.5 uppercase tracking-[0.16em]" data-testid="sort-days">
+                    Days since contact {sortIcon("days")}
+                  </button>
+                </th>
                 <th className="px-4 py-3">Stage</th>
                 <th className="px-4 py-3">Status</th>
                 <th className="px-4 py-3 text-right">Actions</th>
               </tr>
             </thead>
             <tbody>
-              {rows.length === 0 && (
-                <tr><td colSpan={7} className="px-4 py-10 text-center text-slate-400" data-testid="empty-proposals">No proposals yet.</td></tr>
+              {filtered.length === 0 && (
+                <tr><td colSpan={8} className="px-4 py-10 text-center text-slate-400" data-testid="empty-proposals">
+                  {rows.length === 0 ? "No proposals yet." : "No proposals match your search."}
+                </td></tr>
               )}
-              {rows.map((r) => (
+              {filtered.map((r) => (
                 <tr
                   key={r.id}
                   onClick={() => nav(`/proposals/${r.id}`)}
@@ -72,8 +153,9 @@ export default function Proposals() {
                     <div className="text-xs text-slate-400">{r.client_contact_name}</div>
                   </td>
                   <td className="px-4 py-3 font-medium text-slate-900">{r.title}</td>
-                  <td className="px-4 py-3 font-mono-num tnum">{inr(r.value_inr)}</td>
-                  <td className="px-4 py-3 text-slate-500">{dateShort(r.last_contact_date)} <span className="text-slate-400">· {r.days_silent}d</span></td>
+                  <td className="px-4 py-3 font-mono-num tnum" data-testid={`value-${r.id}`}>{inr(r.value_inr)}</td>
+                  <td className="px-4 py-3 text-slate-500">{dateShort(r.last_contact_date)}</td>
+                  <td className="px-4 py-3 tnum text-slate-700" data-testid={`days-${r.id}`}>{r.days_silent}d</td>
                   <td className="px-4 py-3"><StageBadge stage={r.stage} testId={`stage-${r.id}`} /></td>
                   <td className="px-4 py-3"><StatusBadge status={r.status} testId={`status-${r.id}`} /></td>
                   <td className="px-4 py-3 text-right">

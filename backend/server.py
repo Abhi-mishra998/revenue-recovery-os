@@ -98,7 +98,7 @@ def compute_proposal_status(last_contact_date: str) -> str:
     days = (now_utc() - last).days
     if days <= 7:
         return "active"
-    if days <= 21:
+    if days <= 14:
         return "cold"
     return "dead"
 
