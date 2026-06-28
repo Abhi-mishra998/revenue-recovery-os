@@ -91,6 +91,16 @@ def public_user(u: dict) -> dict:
     }
 
 
+async def assert_owns_client(client_id: str, user: dict) -> None:
+    if not await db.clients.find_one({"id": client_id, "owner_id": user["id"]}, {"_id": 1}):
+        raise HTTPException(404, "Client not found")
+
+
+async def assert_owns(collection: str, doc_id: str, user: dict) -> None:
+    if not await db[collection].find_one({"id": doc_id, "owner_id": user["id"]}, {"_id": 1}):
+        raise HTTPException(404, "Not found")
+
+
 # ---------- Status compute (RULE: never typed by user) ----------
 def compute_proposal_status(last_contact_date: str) -> str:
     last = datetime.fromisoformat(last_contact_date)
@@ -355,7 +365,7 @@ async def update_client(client_id: str, payload: ClientUpdate, user: dict = Depe
     res = await db.clients.update_one({"id": client_id, "owner_id": user["id"]}, {"$set": updates})
     if res.matched_count == 0:
         raise HTTPException(404, "Client not found")
-    c = await db.clients.find_one({"id": client_id}, {"_id": 0})
+    c = await db.clients.find_one({"id": client_id, "owner_id": user["id"]}, {"_id": 0})
     return c
 
 
@@ -377,6 +387,7 @@ async def list_proposals(user: dict = Depends(get_current_user)):
 
 @api.post("/proposals")
 async def create_proposal(payload: ProposalCreate, user: dict = Depends(get_current_user)):
+    await assert_owns_client(payload.client_id, user)
     now_iso = now_utc().isoformat()
     doc = payload.model_dump()
     doc["id"] = str(uuid.uuid4())
@@ -393,7 +404,7 @@ async def get_proposal(proposal_id: str, user: dict = Depends(get_current_user))
     p = await db.proposals.find_one({"id": proposal_id, "owner_id": user["id"]}, {"_id": 0})
     if not p:
         raise HTTPException(404, "Proposal not found")
-    clients_map = {p["client_id"]: await db.clients.find_one({"id": p["client_id"]}, {"_id": 0}) or {}}
+    clients_map = {p["client_id"]: await db.clients.find_one({"id": p["client_id"], "owner_id": user["id"]}, {"_id": 0}) or {}}
     return serialize_proposal(p, clients_map)
 
 
@@ -405,7 +416,7 @@ async def update_proposal(proposal_id: str, payload: ProposalUpdate, user: dict 
     res = await db.proposals.update_one({"id": proposal_id, "owner_id": user["id"]}, {"$set": updates})
     if res.matched_count == 0:
         raise HTTPException(404, "Proposal not found")
-    p = await db.proposals.find_one({"id": proposal_id}, {"_id": 0})
+    p = await db.proposals.find_one({"id": proposal_id, "owner_id": user["id"]}, {"_id": 0})
     return serialize_proposal(p)
 
 
@@ -427,6 +438,7 @@ async def list_invoices(user: dict = Depends(get_current_user)):
 
 @api.post("/invoices")
 async def create_invoice(payload: InvoiceCreate, user: dict = Depends(get_current_user)):
+    await assert_owns_client(payload.client_id, user)
     now_iso = now_utc().isoformat()
     doc = payload.model_dump()
     doc["id"] = str(uuid.uuid4())
@@ -453,7 +465,7 @@ async def update_invoice(invoice_id: str, payload: InvoiceUpdate, user: dict = D
     res = await db.invoices.update_one({"id": invoice_id, "owner_id": user["id"]}, {"$set": updates})
     if res.matched_count == 0:
         raise HTTPException(404, "Invoice not found")
-    inv = await db.invoices.find_one({"id": invoice_id}, {"_id": 0})
+    inv = await db.invoices.find_one({"id": invoice_id, "owner_id": user["id"]}, {"_id": 0})
     return serialize_invoice(inv)
 
 
@@ -472,6 +484,9 @@ async def list_activities(user: dict = Depends(get_current_user)):
 
 @api.post("/activities")
 async def create_activity(payload: ActivityCreate, user: dict = Depends(get_current_user)):
+    await assert_owns_client(payload.client_id, user)
+    if payload.related_type and payload.related_id:
+        await assert_owns(payload.related_type + "s", payload.related_id, user)
     doc = payload.model_dump()
     doc["id"] = str(uuid.uuid4())
     doc["owner_id"] = user["id"]
