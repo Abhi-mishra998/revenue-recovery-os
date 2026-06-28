@@ -3,6 +3,7 @@ Sample proposals used by the eval harness. Realistic Indian B2B mix.
 Keep this list small and stable — the harness compares prompts/models
 *across* these fixtures, so changing fixtures invalidates prior results.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass

@@ -15,16 +15,17 @@ The Prediction.confidence field is meta — how much input signal the
 prediction stood on (NOT the model's calibrated uncertainty). Used by the
 UI to dim/show the badge.
 """
+
 from __future__ import annotations
 
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 from typing import Any
 
 
 @dataclass
 class Prediction:
-    probability: float       # 0-1, calibrated as best we can
-    confidence: float        # 0-1, how much signal backed it
+    probability: float  # 0-1, calibrated as best we can
+    confidence: float  # 0-1, how much signal backed it
     reasons: list[str] = field(default_factory=list)
     model_ref: str = "heuristic-v1"
 
@@ -43,11 +44,9 @@ def predict_close_probability(features: dict) -> Prediction:
 
     # Terminal stages — short-circuit, no point modelling further.
     if stage == "won":
-        return Prediction(probability=1.0, confidence=1.0,
-                          reasons=["already won"], model_ref="heuristic-v1")
+        return Prediction(probability=1.0, confidence=1.0, reasons=["already won"], model_ref="heuristic-v1")
     if stage == "lost":
-        return Prediction(probability=0.0, confidence=1.0,
-                          reasons=["already lost"], model_ref="heuristic-v1")
+        return Prediction(probability=0.0, confidence=1.0, reasons=["already lost"], model_ref="heuristic-v1")
 
     base = _stage_base(stage)
     reasons.append(f"stage={stage}: base {base:.2f}")

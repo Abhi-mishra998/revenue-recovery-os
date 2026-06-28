@@ -6,11 +6,13 @@ seeds a client, proposal, invoice, and activity; Bob then tries every way to
 read, modify, delete, or cross-reference them. Every attempt must fail (404
 or empty list); Alice's data must remain intact after each.
 """
+
 import os
 import uuid
+from datetime import datetime, timedelta, timezone
+
 import pytest
 import requests
-from datetime import datetime, timezone, timedelta
 
 BASE_URL = os.environ["REACT_APP_BACKEND_URL"].rstrip("/")
 API = f"{BASE_URL}/api"
@@ -46,27 +48,59 @@ def alice():
     data = _register("alice")
     s = _session(data["token"])
     # Seed one of each owned by Alice
-    c = s.post(f"{API}/clients", json={
-        "company_name": f"Alice_Co_{uuid.uuid4().hex[:6]}",
-        "contact_name": "Alice Contact",
-        "email": "alice_client@example.com",
-        "phone": "+91 99000 00001",
-    }, timeout=15).json()
-    p = s.post(f"{API}/proposals", json={
-        "client_id": c["id"], "title": "Alice secret proposal",
-        "value_inr": 50000, "stage": "sent",
-        "sent_date": _iso_ago(3), "last_contact_date": _iso_ago(3),
-    }, timeout=15).json()
-    inv = s.post(f"{API}/invoices", json={
-        "client_id": c["id"], "invoice_no": f"ALICE-{uuid.uuid4().hex[:5]}",
-        "amount_inr": 25000, "due_date": _iso_ahead(7),
-    }, timeout=15).json()
-    a = s.post(f"{API}/activities", json={
-        "client_id": c["id"], "related_type": "proposal", "related_id": p["id"],
-        "channel": "note", "direction": "internal", "summary": "Alice internal note",
-    }, timeout=15).json()
-    return {"user": data["user"], "token": data["token"], "session": s,
-            "client": c, "proposal": p, "invoice": inv, "activity": a}
+    c = s.post(
+        f"{API}/clients",
+        json={
+            "company_name": f"Alice_Co_{uuid.uuid4().hex[:6]}",
+            "contact_name": "Alice Contact",
+            "email": "alice_client@example.com",
+            "phone": "+91 99000 00001",
+        },
+        timeout=15,
+    ).json()
+    p = s.post(
+        f"{API}/proposals",
+        json={
+            "client_id": c["id"],
+            "title": "Alice secret proposal",
+            "value_inr": 50000,
+            "stage": "sent",
+            "sent_date": _iso_ago(3),
+            "last_contact_date": _iso_ago(3),
+        },
+        timeout=15,
+    ).json()
+    inv = s.post(
+        f"{API}/invoices",
+        json={
+            "client_id": c["id"],
+            "invoice_no": f"ALICE-{uuid.uuid4().hex[:5]}",
+            "amount_inr": 25000,
+            "due_date": _iso_ahead(7),
+        },
+        timeout=15,
+    ).json()
+    a = s.post(
+        f"{API}/activities",
+        json={
+            "client_id": c["id"],
+            "related_type": "proposal",
+            "related_id": p["id"],
+            "channel": "note",
+            "direction": "internal",
+            "summary": "Alice internal note",
+        },
+        timeout=15,
+    ).json()
+    return {
+        "user": data["user"],
+        "token": data["token"],
+        "session": s,
+        "client": c,
+        "proposal": p,
+        "invoice": inv,
+        "activity": a,
+    }
 
 
 @pytest.fixture(scope="class")
@@ -120,7 +154,8 @@ class TestUpdateIsolation:
     def test_patch_alice_client(self, alice, bob):
         r = bob["session"].patch(
             f"{API}/clients/{alice['client']['id']}",
-            json={"company_name": "Pwned by Bob"}, timeout=15,
+            json={"company_name": "Pwned by Bob"},
+            timeout=15,
         )
         assert r.status_code == 404, r.text
         fresh = alice["session"].get(f"{API}/clients/{alice['client']['id']}", timeout=15).json()
@@ -129,7 +164,8 @@ class TestUpdateIsolation:
     def test_patch_alice_proposal(self, alice, bob):
         r = bob["session"].patch(
             f"{API}/proposals/{alice['proposal']['id']}",
-            json={"value_inr": 1}, timeout=15,
+            json={"value_inr": 1},
+            timeout=15,
         )
         assert r.status_code == 404, r.text
         fresh = alice["session"].get(f"{API}/proposals/{alice['proposal']['id']}", timeout=15).json()
@@ -138,7 +174,8 @@ class TestUpdateIsolation:
     def test_patch_alice_invoice(self, alice, bob):
         r = bob["session"].patch(
             f"{API}/invoices/{alice['invoice']['id']}",
-            json={"amount_inr": 1}, timeout=15,
+            json={"amount_inr": 1},
+            timeout=15,
         )
         assert r.status_code == 404, r.text
         fresh = alice["session"].get(f"{API}/invoices/{alice['invoice']['id']}", timeout=15).json()
@@ -169,37 +206,68 @@ class TestCrossReferenceIsolation:
     """Bob can't create rows that point at Alice's UUIDs."""
 
     def test_create_proposal_with_alice_client_id(self, alice, bob):
-        r = bob["session"].post(f"{API}/proposals", json={
-            "client_id": alice["client"]["id"],
-            "title": "Bob hijack attempt", "value_inr": 100, "stage": "sent",
-        }, timeout=15)
+        r = bob["session"].post(
+            f"{API}/proposals",
+            json={
+                "client_id": alice["client"]["id"],
+                "title": "Bob hijack attempt",
+                "value_inr": 100,
+                "stage": "sent",
+            },
+            timeout=15,
+        )
         assert r.status_code == 404, r.text
 
     def test_create_invoice_with_alice_client_id(self, alice, bob):
-        r = bob["session"].post(f"{API}/invoices", json={
-            "client_id": alice["client"]["id"],
-            "invoice_no": f"BOB-{uuid.uuid4().hex[:5]}",
-            "amount_inr": 100, "due_date": _iso_ahead(7),
-        }, timeout=15)
+        r = bob["session"].post(
+            f"{API}/invoices",
+            json={
+                "client_id": alice["client"]["id"],
+                "invoice_no": f"BOB-{uuid.uuid4().hex[:5]}",
+                "amount_inr": 100,
+                "due_date": _iso_ahead(7),
+            },
+            timeout=15,
+        )
         assert r.status_code == 404, r.text
 
     def test_create_activity_with_alice_client_id(self, alice, bob):
-        r = bob["session"].post(f"{API}/activities", json={
-            "client_id": alice["client"]["id"],
-            "channel": "note", "summary": "leak",
-        }, timeout=15)
+        r = bob["session"].post(
+            f"{API}/activities",
+            json={
+                "client_id": alice["client"]["id"],
+                "channel": "note",
+                "summary": "leak",
+            },
+            timeout=15,
+        )
         assert r.status_code == 404, r.text
 
     def test_create_activity_with_alice_proposal_id(self, alice, bob):
         # Bob would need his own client first
-        own_client = bob["session"].post(f"{API}/clients", json={
-            "company_name": f"Bob_Co_{uuid.uuid4().hex[:6]}", "contact_name": "Bob Contact",
-        }, timeout=15).json()
-        r = bob["session"].post(f"{API}/activities", json={
-            "client_id": own_client["id"],
-            "related_type": "proposal", "related_id": alice["proposal"]["id"],
-            "channel": "note", "summary": "leak",
-        }, timeout=15)
+        own_client = (
+            bob["session"]
+            .post(
+                f"{API}/clients",
+                json={
+                    "company_name": f"Bob_Co_{uuid.uuid4().hex[:6]}",
+                    "contact_name": "Bob Contact",
+                },
+                timeout=15,
+            )
+            .json()
+        )
+        r = bob["session"].post(
+            f"{API}/activities",
+            json={
+                "client_id": own_client["id"],
+                "related_type": "proposal",
+                "related_id": alice["proposal"]["id"],
+                "channel": "note",
+                "summary": "leak",
+            },
+            timeout=15,
+        )
         assert r.status_code == 404, r.text
 
 

@@ -1,10 +1,13 @@
 """Unit tests for PII redaction + output guardrail. No LLM."""
+
 import pytest
 
-from services.ai.redact import redact, rehydrate, has_unrehydrated_tokens, TOKEN_RE
 from services.ai.guardrail import (
-    check_followup_draft, enforce_followup, GuardrailViolation,
+    GuardrailViolation,
+    check_followup_draft,
+    enforce_followup,
 )
+from services.ai.redact import TOKEN_RE, has_unrehydrated_tokens, redact, rehydrate
 from services.ai.schemas import FollowUpDraft
 
 
@@ -80,7 +83,9 @@ class TestGuardrail:
         assert r.ok and r.issues == []
 
     def test_ai_disclaimer_blocked(self):
-        d = _draft(email_body="Hi there,\n\nAs an AI language model I cannot help with this specific request.\n\nThanks")
+        d = _draft(
+            email_body="Hi there,\n\nAs an AI language model I cannot help with this specific request.\n\nThanks"
+        )
         r = check_followup_draft(d)
         assert not r.ok
         assert any("blacklisted" in i for i in r.issues)
@@ -106,7 +111,9 @@ class TestGuardrail:
         assert any("too long" in i for i in r.issues)
 
     def test_single_line_email_body_blocked(self):
-        d = _draft(email_body="Hi this is a single line email body without any paragraph breaks at all thanks Rohan")
+        d = _draft(
+            email_body="Hi this is a single line email body without any paragraph breaks at all thanks Rohan"
+        )
         r = check_followup_draft(d)
         assert not r.ok
         assert any("single line" in i for i in r.issues)

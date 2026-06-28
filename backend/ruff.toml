@@ -1,0 +1,32 @@
+# ruff config — single tool for lint + format.
+# Permissive on purpose: catches real bugs (F* errors, E9*, undefined names)
+# without flagging existing-code style choices that would force a sweeping
+# rewrite. Tighten over time.
+
+target-version = "py312"
+line-length = 110
+
+# Exclude vendored / generated / scratch
+extend-exclude = [
+  ".venv",
+  "__pycache__",
+  "scripts/migrate_to_postgres.py",  # multi-line SQL literals trip line-length
+]
+
+[lint]
+# F  — pyflakes (real bugs)
+# E9 — runtime syntax errors only
+# W6 — deprecation warnings
+# B  — flake8-bugbear (likely bugs)
+# I  — import sort
+select = ["F", "E9", "W6", "B", "I"]
+
+# Carve-outs for existing code patterns we don't want to rewrite right now.
+ignore = [
+  "B008",   # FastAPI Depends() in defaults — standard FastAPI idiom
+  "B904",   # raise from — adding 'from' to every HTTPException is busywork
+  "F401",   # unused imports — re-exports use them, would need __all__ on every module
+]
+
+[lint.per-file-ignores]
+"tests/*" = ["F841"]  # 'unused' local vars in tests are often fixture setup

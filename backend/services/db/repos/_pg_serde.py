@@ -3,6 +3,7 @@ Shared (de)serialisation helpers between the postgres rows and the dict shape
 the API has always returned. Goal: callers see the same keys/types they did
 on the mongo path.
 """
+
 from __future__ import annotations
 
 import json
@@ -16,8 +17,14 @@ def row_to_dict(record) -> dict:
         return None  # type: ignore[return-value]
     d = dict(record)
     for k, v in list(d.items()):
-        if isinstance(v, str) and k in ("context", "metadata", "prior_value",
-                                         "new_value", "channel_counts", "last_outcomes"):
+        if isinstance(v, str) and k in (
+            "context",
+            "metadata",
+            "prior_value",
+            "new_value",
+            "channel_counts",
+            "last_outcomes",
+        ):
             try:
                 d[k] = json.loads(v)
             except Exception:

@@ -6,8 +6,9 @@ read and every list response, so unit-testing the boundaries explicitly
 guards against silent drift (see the cold/dead threshold regression
 in the OPUS-0 audit).
 """
+
 import os
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 
 # Test env needs the same vars as the live backend for `import server` to work,
 # since server.py reads MONGO_URL / JWT_SECRET at import time.
@@ -16,9 +17,10 @@ os.environ.setdefault("DB_NAME", "revora_test")
 os.environ.setdefault("JWT_SECRET", "test-secret-do-not-use-in-prod")
 
 import pytest
+
 from server import (
-    compute_proposal_status,
     compute_invoice_status_and_overdue,
+    compute_proposal_status,
     days_since,
 )
 
@@ -33,12 +35,22 @@ def iso_ahead(days: int) -> str:
 
 # ---------- compute_proposal_status (PRD: active ≤7, cold 8-21, dead >21) ----
 
+
 class TestComputeProposalStatus:
-    @pytest.mark.parametrize("days,expected", [
-        (0, "active"), (1, "active"), (7, "active"),
-        (8, "cold"), (14, "cold"), (21, "cold"),
-        (22, "dead"), (30, "dead"), (365, "dead"),
-    ])
+    @pytest.mark.parametrize(
+        "days,expected",
+        [
+            (0, "active"),
+            (1, "active"),
+            (7, "active"),
+            (8, "cold"),
+            (14, "cold"),
+            (21, "cold"),
+            (22, "dead"),
+            (30, "dead"),
+            (365, "dead"),
+        ],
+    )
     def test_boundaries(self, days, expected):
         assert compute_proposal_status(iso_ago(days)) == expected
 
@@ -49,8 +61,9 @@ class TestComputeProposalStatus:
 
     def test_aware_datetime_with_offset(self):
         """ISO with a +05:30 (IST) offset still computes correctly."""
-        ist_15d_ago = (datetime.now(timezone(timedelta(hours=5, minutes=30)))
-                        - timedelta(days=15)).isoformat()
+        ist_15d_ago = (
+            datetime.now(timezone(timedelta(hours=5, minutes=30))) - timedelta(days=15)
+        ).isoformat()
         assert compute_proposal_status(ist_15d_ago) == "cold"
 
     def test_future_date_is_active(self):
@@ -60,10 +73,10 @@ class TestComputeProposalStatus:
 
 # ---------- compute_invoice_status_and_overdue ----------
 
+
 class TestComputeInvoiceStatus:
     def test_paid_invoice_is_paid_with_zero_overdue(self):
-        inv = {"due_date": iso_ago(10), "paid_date": iso_ago(2),
-               "amount_inr": 100}
+        inv = {"due_date": iso_ago(10), "paid_date": iso_ago(2), "amount_inr": 100}
         s, d = compute_invoice_status_and_overdue(inv)
         assert s == "paid" and d == 0
 
@@ -92,6 +105,7 @@ class TestComputeInvoiceStatus:
 
 
 # ---------- days_since ----------
+
 
 class TestDaysSince:
     def test_zero_for_now(self):

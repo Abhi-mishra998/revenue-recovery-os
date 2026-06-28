@@ -11,6 +11,7 @@ Hard rule: even if checks pass, the system never sends the draft itself.
 A human still copies and sends. The guardrail is one more belt over the
 "copy-only" suspenders.
 """
+
 from __future__ import annotations
 
 import logging
@@ -45,6 +46,7 @@ _BLACKLIST = (
 
 class GuardrailViolation(RuntimeError):
     """One or more guardrail checks failed. .issues holds the list."""
+
     def __init__(self, issues: list[str]):
         super().__init__("; ".join(issues))
         self.issues = issues
@@ -59,9 +61,11 @@ class GuardrailResult:
 def check_followup_draft(draft: FollowUpDraft) -> GuardrailResult:
     issues: list[str] = []
 
-    for field, text in (("whatsapp_text", draft.whatsapp_text),
-                        ("email_subject", draft.email_subject),
-                        ("email_body",    draft.email_body)):
+    for field, text in (
+        ("whatsapp_text", draft.whatsapp_text),
+        ("email_subject", draft.email_subject),
+        ("email_body", draft.email_body),
+    ):
         text = text or ""
         if has_unrehydrated_tokens(text):
             issues.append(f"{field}: leaked redaction token")

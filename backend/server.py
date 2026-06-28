@@ -1,55 +1,74 @@
-from dotenv import load_dotenv
 from pathlib import Path
 
-ROOT_DIR = Path(__file__).parent
-load_dotenv(ROOT_DIR / '.env')
+from dotenv import load_dotenv
 
-import os
+ROOT_DIR = Path(__file__).parent
+load_dotenv(ROOT_DIR / ".env")
+
 import logging
+import os
 import time
 import uuid
+from datetime import datetime, timedelta, timezone
+from typing import List, Literal, Optional
+
 import bcrypt
 import httpx
 import jwt
-from datetime import datetime, timezone, timedelta
-from typing import List, Optional, Literal
-
-from fastapi import FastAPI, APIRouter, Depends, HTTPException, Request
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from starlette.middleware.cors import CORSMiddleware
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel, EmailStr, Field
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
+from starlette.middleware.cors import CORSMiddleware
 
-from services.seed import seed_demo_for_owner
-from services.ai import generate_proposal_followup, NoApiKeyError, GuardrailViolation, MalformedOutputError
-from services.audit import append_audit, load_signing_key, verify_chain, get_public_key_fp
-from services.events import emit_event
-from services.memory import recompute_client_memory, get_or_compute_client_memory
+from services.ai import GuardrailViolation, MalformedOutputError, NoApiKeyError, generate_proposal_followup
+from services.audit import append_audit, get_public_key_fp, load_signing_key, verify_chain
 from services.data import extract_proposal_features, predict_close_probability
-from services.db import is_postgres, is_mongo
+from services.db import is_mongo, is_postgres
 from services.db import pg as pgdb
 from services.db.repos import (
-    users      as users_repo,
-    clients    as clients_repo,
-    proposals  as proposals_repo,
-    invoices   as invoices_repo,
     activities as activities_repo,
-    followups  as followups_repo,
-    events     as events_repo,
-    client_memory as memory_repo,
-    audit_log  as audit_log_repo,
-    settings   as settings_repo,
 )
+from services.db.repos import (
+    audit_log as audit_log_repo,
+)
+from services.db.repos import (
+    client_memory as memory_repo,
+)
+from services.db.repos import (
+    clients as clients_repo,
+)
+from services.db.repos import (
+    events as events_repo,
+)
+from services.db.repos import (
+    followups as followups_repo,
+)
+from services.db.repos import (
+    invoices as invoices_repo,
+)
+from services.db.repos import (
+    proposals as proposals_repo,
+)
+from services.db.repos import (
+    settings as settings_repo,
+)
+from services.db.repos import (
+    users as users_repo,
+)
+from services.events import emit_event
+from services.memory import get_or_compute_client_memory, recompute_client_memory
+from services.seed import seed_demo_for_owner
 
 # ---------- MongoDB ----------
-mongo_url = os.environ['MONGO_URL']
+mongo_url = os.environ["MONGO_URL"]
 client = AsyncIOMotorClient(mongo_url)
-db = client[os.environ['DB_NAME']]
+db = client[os.environ["DB_NAME"]]
 
-JWT_SECRET = os.environ['JWT_SECRET']
+JWT_SECRET = os.environ["JWT_SECRET"]
 JWT_ALG = "HS256"
 
 EMERGENT_AUTH_SESSION_URL = "https://demobackend.emergentagent.com/auth/v1/env/oauth/session-data"
@@ -66,7 +85,8 @@ def _user_or_ip_key(request: Request) -> str:
         try:
             payload = jwt.decode(
                 auth.split(None, 1)[1].strip(),
-                JWT_SECRET, algorithms=[JWT_ALG],
+                JWT_SECRET,
+                algorithms=[JWT_ALG],
                 options={"verify_exp": False},
             )
             sub = payload.get("sub")
@@ -158,7 +178,7 @@ async def assert_owns_client(client_id: str, user: dict) -> None:
 
 
 _EXISTS_BY_COLLECTION = {
-    "clients":   clients_repo.exists_for_owner,
+    "clients": clients_repo.exists_for_owner,
     "proposals": proposals_repo.exists_for_owner,
 }
 
@@ -356,8 +376,15 @@ async def register(request: Request, req: RegisterReq):
         "created_at": now_utc().isoformat(),
     }
     await users_repo.insert(doc)
-    await append_audit(db, action="auth.register", actor_id=user_id, actor_email=email,
-                       resource_type="user", resource_id=user_id, payload={"name": req.name})
+    await append_audit(
+        db,
+        action="auth.register",
+        actor_id=user_id,
+        actor_email=email,
+        resource_type="user",
+        resource_id=user_id,
+        payload={"name": req.name},
+    )
     token = create_access_token(user_id, email, 0)
     return {"token": token, "user": public_user(doc)}
 
@@ -408,14 +435,22 @@ async def google_session(request: Request, req: GoogleSessionReq):
             "created_at": now_utc().isoformat(),
         }
         await users_repo.insert(user.copy())
-        await append_audit(db, action="auth.google_session.register",
-                           actor_id=user["id"], actor_email=email,
-                           resource_type="user", resource_id=user["id"],
-                           payload={"name": name})
+        await append_audit(
+            db,
+            action="auth.google_session.register",
+            actor_id=user["id"],
+            actor_email=email,
+            resource_type="user",
+            resource_id=user["id"],
+            payload={"name": name},
+        )
     elif user.get("auth_provider") != "google":
         # Refuse silent account linking — a Google account for a password user's
         # email would otherwise take over that account.
-        raise HTTPException(status_code=409, detail="This email is registered with a password. Please sign in with your password.")
+        raise HTTPException(
+            status_code=409,
+            detail="This email is registered with a password. Please sign in with your password.",
+        )
 
     token = create_access_token(user["id"], email, user.get("token_version", 0))
     return {"token": token, "user": public_user(user)}
@@ -447,8 +482,14 @@ async def create_client(payload: ClientCreate, user: dict = Depends(get_current_
     doc["owner_id"] = user["id"]
     doc["created_at"] = now_utc().isoformat()
     await clients_repo.insert(doc)
-    await append_audit(action="client.create", actor_id=user["id"], actor_email=user["email"],
-                       resource_type="client", resource_id=doc["id"], payload=payload.model_dump())
+    await append_audit(
+        action="client.create",
+        actor_id=user["id"],
+        actor_email=user["email"],
+        resource_type="client",
+        resource_id=doc["id"],
+        payload=payload.model_dump(),
+    )
     return doc
 
 
@@ -475,8 +516,14 @@ async def update_client(client_id: str, payload: ClientUpdate, user: dict = Depe
     if not matched:
         raise HTTPException(404, "Client not found")
     c = await clients_repo.get_for_owner(client_id, user["id"])
-    await append_audit(action="client.update", actor_id=user["id"], actor_email=user["email"],
-                       resource_type="client", resource_id=client_id, payload=updates)
+    await append_audit(
+        action="client.update",
+        actor_id=user["id"],
+        actor_email=user["email"],
+        resource_type="client",
+        resource_id=client_id,
+        payload=updates,
+    )
     return c
 
 
@@ -484,8 +531,13 @@ async def update_client(client_id: str, payload: ClientUpdate, user: dict = Depe
 async def delete_client(client_id: str, user: dict = Depends(get_current_user)):
     deleted = await clients_repo.delete_for_owner(client_id, user["id"])
     if deleted:
-        await append_audit(action="client.delete", actor_id=user["id"], actor_email=user["email"],
-                           resource_type="client", resource_id=client_id)
+        await append_audit(
+            action="client.delete",
+            actor_id=user["id"],
+            actor_email=user["email"],
+            resource_type="client",
+            resource_id=client_id,
+        )
         await memory_repo.delete_for_client(user["id"], client_id)
     return {"ok": True}
 
@@ -523,11 +575,22 @@ async def create_proposal(payload: ProposalCreate, user: dict = Depends(get_curr
     doc["last_contact_date"] = doc.get("last_contact_date") or doc["sent_date"]
     doc["created_at"] = now_iso
     await proposals_repo.insert(doc)
-    await append_audit(action="proposal.create", actor_id=user["id"], actor_email=user["email"],
-                       resource_type="proposal", resource_id=doc["id"], payload=payload.model_dump())
-    await emit_event(owner_id=user["id"], event_type="proposal.created",
-                     entity_type="proposal", entity_id=doc["id"], source="user",
-                     metadata={"value_inr": doc["value_inr"], "stage": doc["stage"], "client_id": doc["client_id"]})
+    await append_audit(
+        action="proposal.create",
+        actor_id=user["id"],
+        actor_email=user["email"],
+        resource_type="proposal",
+        resource_id=doc["id"],
+        payload=payload.model_dump(),
+    )
+    await emit_event(
+        owner_id=user["id"],
+        event_type="proposal.created",
+        entity_type="proposal",
+        entity_id=doc["id"],
+        source="user",
+        metadata={"value_inr": doc["value_inr"], "stage": doc["stage"], "client_id": doc["client_id"]},
+    )
     return serialize_proposal(doc)
 
 
@@ -570,22 +633,41 @@ async def update_proposal(proposal_id: str, payload: ProposalUpdate, user: dict 
 
     await proposals_repo.update_for_owner(proposal_id, user["id"], updates)
     p = await proposals_repo.get_for_owner(proposal_id, user["id"])
-    await append_audit(action="proposal.update", actor_id=user["id"], actor_email=user["email"],
-                       resource_type="proposal", resource_id=proposal_id, payload=updates)
+    await append_audit(
+        action="proposal.update",
+        actor_id=user["id"],
+        actor_email=user["email"],
+        resource_type="proposal",
+        resource_id=proposal_id,
+        payload=updates,
+    )
 
     if stage_changing:
         sent_iso = prior.get("sent_date")
         days_to_close = days_since(sent_iso) if sent_iso else None
-        await emit_event(owner_id=user["id"], event_type="proposal.stage_changed",
-                         entity_type="proposal", entity_id=proposal_id, source="user",
-                         prior_value=prior_stage, new_value=new_stage,
-                         metadata={"value_inr": prior.get("value_inr"), "client_id": prior.get("client_id")})
+        await emit_event(
+            owner_id=user["id"],
+            event_type="proposal.stage_changed",
+            entity_type="proposal",
+            entity_id=proposal_id,
+            source="user",
+            prior_value=prior_stage,
+            new_value=new_stage,
+            metadata={"value_inr": prior.get("value_inr"), "client_id": prior.get("client_id")},
+        )
         if new_stage in ("won", "lost"):
-            await emit_event(owner_id=user["id"], event_type=f"proposal.{new_stage}",
-                             entity_type="proposal", entity_id=proposal_id, source="user",
-                             metadata={"value_inr": prior.get("value_inr"),
-                                       "days_to_close": days_to_close,
-                                       "client_id": prior.get("client_id")})
+            await emit_event(
+                owner_id=user["id"],
+                event_type=f"proposal.{new_stage}",
+                entity_type="proposal",
+                entity_id=proposal_id,
+                source="user",
+                metadata={
+                    "value_inr": prior.get("value_inr"),
+                    "days_to_close": days_to_close,
+                    "client_id": prior.get("client_id"),
+                },
+            )
             await recompute_client_memory(owner_id=user["id"], client_id=prior["client_id"])
     return serialize_proposal(p)
 
@@ -594,8 +676,13 @@ async def update_proposal(proposal_id: str, payload: ProposalUpdate, user: dict 
 async def delete_proposal(proposal_id: str, user: dict = Depends(get_current_user)):
     deleted = await proposals_repo.delete_for_owner(proposal_id, user["id"])
     if deleted:
-        await append_audit(action="proposal.delete", actor_id=user["id"], actor_email=user["email"],
-                           resource_type="proposal", resource_id=proposal_id)
+        await append_audit(
+            action="proposal.delete",
+            actor_id=user["id"],
+            actor_email=user["email"],
+            resource_type="proposal",
+            resource_id=proposal_id,
+        )
     return {"ok": True}
 
 
@@ -619,12 +706,26 @@ async def create_invoice(payload: InvoiceCreate, user: dict = Depends(get_curren
     doc["issued_at"] = now_iso
     doc["created_at"] = now_iso
     await invoices_repo.insert(doc)
-    await append_audit(action="invoice.create", actor_id=user["id"], actor_email=user["email"],
-                       resource_type="invoice", resource_id=doc["id"], payload=payload.model_dump())
-    await emit_event(owner_id=user["id"], event_type="invoice.created",
-                     entity_type="invoice", entity_id=doc["id"], source="user",
-                     metadata={"amount_inr": doc["amount_inr"], "due_date": doc["due_date"],
-                               "client_id": doc["client_id"]})
+    await append_audit(
+        action="invoice.create",
+        actor_id=user["id"],
+        actor_email=user["email"],
+        resource_type="invoice",
+        resource_id=doc["id"],
+        payload=payload.model_dump(),
+    )
+    await emit_event(
+        owner_id=user["id"],
+        event_type="invoice.created",
+        entity_type="invoice",
+        entity_id=doc["id"],
+        source="user",
+        metadata={
+            "amount_inr": doc["amount_inr"],
+            "due_date": doc["due_date"],
+            "client_id": doc["client_id"],
+        },
+    )
     return serialize_invoice(doc)
 
 
@@ -648,16 +749,29 @@ async def update_invoice(invoice_id: str, payload: InvoiceUpdate, user: dict = D
 
     await invoices_repo.update_for_owner(invoice_id, user["id"], updates)
     inv = await invoices_repo.get_for_owner(invoice_id, user["id"])
-    await append_audit(action="invoice.update", actor_id=user["id"], actor_email=user["email"],
-                       resource_type="invoice", resource_id=invoice_id, payload=updates)
+    await append_audit(
+        action="invoice.update",
+        actor_id=user["id"],
+        actor_email=user["email"],
+        resource_type="invoice",
+        resource_id=invoice_id,
+        payload=updates,
+    )
 
     if became_paid:
         _, days_overdue_at_payment = compute_invoice_status_and_overdue({**prior, "paid_date": None})
-        await emit_event(owner_id=user["id"], event_type="invoice.payment_received",
-                         entity_type="invoice", entity_id=invoice_id, source="user",
-                         metadata={"amount_inr": prior.get("amount_inr"),
-                                   "days_overdue_at_payment": days_overdue_at_payment,
-                                   "client_id": prior.get("client_id")})
+        await emit_event(
+            owner_id=user["id"],
+            event_type="invoice.payment_received",
+            entity_type="invoice",
+            entity_id=invoice_id,
+            source="user",
+            metadata={
+                "amount_inr": prior.get("amount_inr"),
+                "days_overdue_at_payment": days_overdue_at_payment,
+                "client_id": prior.get("client_id"),
+            },
+        )
         await recompute_client_memory(owner_id=user["id"], client_id=prior["client_id"])
     return serialize_invoice(inv)
 
@@ -666,23 +780,33 @@ async def update_invoice(invoice_id: str, payload: InvoiceUpdate, user: dict = D
 async def delete_invoice(invoice_id: str, user: dict = Depends(get_current_user)):
     deleted = await invoices_repo.delete_for_owner(invoice_id, user["id"])
     if deleted:
-        await append_audit(action="invoice.delete", actor_id=user["id"], actor_email=user["email"],
-                           resource_type="invoice", resource_id=invoice_id)
+        await append_audit(
+            action="invoice.delete",
+            actor_id=user["id"],
+            actor_email=user["email"],
+            resource_type="invoice",
+            resource_id=invoice_id,
+        )
     return {"ok": True}
 
 
 # ---------- Events (append-only product analytics) ----------
 @api.get("/events")
 async def list_events(
-    entity_type: Optional[str] = None, entity_id: Optional[str] = None,
-    event_type: Optional[str] = None, limit: int = 200,
+    entity_type: Optional[str] = None,
+    entity_id: Optional[str] = None,
+    event_type: Optional[str] = None,
+    limit: int = 200,
     user: dict = Depends(get_current_user),
 ):
     """Read-only tail of the events stream, scoped to the caller's tenant."""
     limit = max(1, min(1000, limit))
     return await events_repo.list_filtered(
-        user["id"], entity_type=entity_type, entity_id=entity_id,
-        event_type=event_type, limit=limit,
+        user["id"],
+        entity_type=entity_type,
+        entity_id=entity_id,
+        event_type=event_type,
+        limit=limit,
     )
 
 
@@ -702,15 +826,20 @@ async def create_activity(payload: ActivityCreate, user: dict = Depends(get_curr
     doc["owner_id"] = user["id"]
     doc["created_at"] = now_utc().isoformat()
     await activities_repo.insert(doc)
-    await append_audit(action="activity.create", actor_id=user["id"], actor_email=user["email"],
-                       resource_type="activity", resource_id=doc["id"], payload=payload.model_dump())
+    await append_audit(
+        action="activity.create",
+        actor_id=user["id"],
+        actor_email=user["email"],
+        resource_type="activity",
+        resource_id=doc["id"],
+        payload=payload.model_dump(),
+    )
     await recompute_client_memory(owner_id=user["id"], client_id=doc["client_id"])
     return doc
 
 
 # ---------- Dashboard ----------
-def compute_dashboard_summary(proposals: List[dict], invoices: List[dict],
-                              clients_map: dict) -> dict:
+def compute_dashboard_summary(proposals: List[dict], invoices: List[dict], clients_map: dict) -> dict:
     """Pure function — unit-testable. Endpoint just wires it to the repos.
     Inputs are the raw rows from list_for_dashboard; outputs are the wire
     response. Recovery math lives here exactly once."""
@@ -759,13 +888,18 @@ def compute_dashboard_summary(proposals: List[dict], invoices: List[dict],
     top_at_risk = []
     for p, status, value in at_risk_candidates[:5]:
         c = clients_map.get(p["client_id"], {})
-        top_at_risk.append({
-            "id": p["id"], "title": p["title"], "value_inr": value, "status": status,
-            "days_silent": days_since(p["last_contact_date"]),
-            "stage": p.get("stage", "sent"),
-            "client_company_name": c.get("company_name", "Unknown"),
-            "client_contact_name": c.get("contact_name", ""),
-        })
+        top_at_risk.append(
+            {
+                "id": p["id"],
+                "title": p["title"],
+                "value_inr": value,
+                "status": status,
+                "days_silent": days_since(p["last_contact_date"]),
+                "stage": p.get("stage", "sent"),
+                "client_company_name": c.get("company_name", "Unknown"),
+                "client_contact_name": c.get("contact_name", ""),
+            }
+        )
 
     return {
         "total_pipeline_inr": total_pipeline,
@@ -810,9 +944,12 @@ async def get_killswitch(admin: dict = Depends(require_admin)):
 @api.post("/admin/killswitch")
 async def set_killswitch(req: KillSwitchReq, admin: dict = Depends(require_admin)):
     await settings_repo.set_ai_killswitch(req.enabled)
-    await append_audit(action="admin.killswitch.set",
-                       actor_id=admin["id"], actor_email=admin["email"],
-                       payload={"enabled": req.enabled})
+    await append_audit(
+        action="admin.killswitch.set",
+        actor_id=admin["id"],
+        actor_email=admin["email"],
+        payload={"enabled": req.enabled},
+    )
     return {"ai_killswitch": req.enabled}
 
 
@@ -822,11 +959,9 @@ async def admin_ai_config(admin: dict = Depends(require_admin)):
     """Read-only view of the active prompts + routing table — powers the
     admin dashboard's 'AI Config' card."""
     from services.ai import prompts as _prompts
-    from services.ai.router import _DEFAULTS, route, RouteSignals, HIGH_VALUE_THRESHOLD_INR
-    active = {
-        task: {"ref": t.ref, "description": t.description}
-        for task, t in _prompts.ACTIVE.items()
-    }
+    from services.ai.router import _DEFAULTS, HIGH_VALUE_THRESHOLD_INR, RouteSignals, route
+
+    active = {task: {"ref": t.ref, "description": t.description} for task, t in _prompts.ACTIVE.items()}
     versions = {t.ref: t.description for t in _prompts.ALL.values()}
     sample_simple = route(RouteSignals(value_inr=100_000))
     sample_complex = route(RouteSignals(value_inr=HIGH_VALUE_THRESHOLD_INR))
@@ -834,7 +969,7 @@ async def admin_ai_config(admin: dict = Depends(require_admin)):
         "active_prompts": active,
         "prompt_versions": versions,
         "routes_default": {
-            "simple":  {"provider": sample_simple.provider, "model": sample_simple.model},
+            "simple": {"provider": sample_simple.provider, "model": sample_simple.model},
             "complex": {"provider": sample_complex.provider, "model": sample_complex.model},
         },
         "high_value_threshold_inr": HIGH_VALUE_THRESHOLD_INR,
@@ -850,7 +985,9 @@ async def admin_audit_verify(limit: Optional[int] = None, admin: dict = Depends(
 
 @api.get("/admin/audit-log")
 async def admin_audit_list(
-    page: int = 1, page_size: int = 50, admin: dict = Depends(require_admin),
+    page: int = 1,
+    page_size: int = 50,
+    admin: dict = Depends(require_admin),
 ):
     """Paginated read of audit records, newest first."""
     page = max(1, page)
@@ -858,7 +995,9 @@ async def admin_audit_list(
     total = await audit_log_repo.count()
     rows = await audit_log_repo.list_paginated(page, page_size)
     return {
-        "page": page, "page_size": page_size, "total": total,
+        "page": page,
+        "page_size": page_size,
+        "total": total,
         "public_key_fp": get_public_key_fp(),
         "records": rows,
     }
@@ -866,13 +1005,17 @@ async def admin_audit_list(
 
 @api.post("/proposals/{proposal_id}/generate-followup")
 @limiter.limit("10/hour", key_func=_user_or_ip_key)
-async def generate_followup_for_proposal(request: Request, proposal_id: str, user: dict = Depends(get_current_user)):
+async def generate_followup_for_proposal(
+    request: Request, proposal_id: str, user: dict = Depends(get_current_user)
+):
     """
     Generate TWO drafts (WhatsApp + Email) for a proposal using the configured LLM.
     Saves each draft to a FollowUp record. Never sends anything.
     """
     if await ai_killswitch_enabled():
-        raise HTTPException(status_code=503, detail="AI generation is currently disabled by the administrator.")
+        raise HTTPException(
+            status_code=503, detail="AI generation is currently disabled by the administrator."
+        )
     p = await proposals_repo.get_for_owner(proposal_id, user["id"])
     if not p:
         raise HTTPException(404, "Proposal not found")
@@ -921,26 +1064,45 @@ async def generate_followup_for_proposal(request: Request, proposal_id: str, use
         "latency_ms": latency_ms,
         "created_at": now_iso,
     }
-    await followups_repo.insert_many([
-        {**common, "id": wa_id, "channel": "whatsapp",
-         "draft_text": result["whatsapp_text"]},
-        {**common, "id": em_id, "channel": "email",
-         "draft_text": (f"Subject: {result['email_subject']}\n\n{result['email_body']}").strip()},
-    ])
-    await append_audit(action="ai.followup.generate",
-                       actor_id=user["id"], actor_email=user["email"],
-                       resource_type="proposal", resource_id=proposal_id,
-                       payload={"days_silent": days, "generation_id": generation_id,
-                                "prompt_ref": result.get("prompt_ref"),
-                                "route_ref": result.get("route_ref"),
-                                "latency_ms": latency_ms})
-    await emit_event(owner_id=user["id"], event_type="followup.generated",
-                     entity_type="proposal", entity_id=proposal_id, source="system",
-                     metadata={"generation_id": generation_id,
-                               "prompt_ref": result.get("prompt_ref"),
-                               "route_ref": result.get("route_ref"),
-                               "latency_ms": latency_ms,
-                               "client_id": p["client_id"]})
+    await followups_repo.insert_many(
+        [
+            {**common, "id": wa_id, "channel": "whatsapp", "draft_text": result["whatsapp_text"]},
+            {
+                **common,
+                "id": em_id,
+                "channel": "email",
+                "draft_text": (f"Subject: {result['email_subject']}\n\n{result['email_body']}").strip(),
+            },
+        ]
+    )
+    await append_audit(
+        action="ai.followup.generate",
+        actor_id=user["id"],
+        actor_email=user["email"],
+        resource_type="proposal",
+        resource_id=proposal_id,
+        payload={
+            "days_silent": days,
+            "generation_id": generation_id,
+            "prompt_ref": result.get("prompt_ref"),
+            "route_ref": result.get("route_ref"),
+            "latency_ms": latency_ms,
+        },
+    )
+    await emit_event(
+        owner_id=user["id"],
+        event_type="followup.generated",
+        entity_type="proposal",
+        entity_id=proposal_id,
+        source="system",
+        metadata={
+            "generation_id": generation_id,
+            "prompt_ref": result.get("prompt_ref"),
+            "route_ref": result.get("route_ref"),
+            "latency_ms": latency_ms,
+            "client_id": p["client_id"],
+        },
+    )
 
     return {
         "whatsapp": {"id": wa_id, "text": result["whatsapp_text"]},
@@ -964,27 +1126,50 @@ async def migrate_legacy_fields():
     is absent and old field exists.
     """
     # Clients: name -> contact_name, company -> company_name
-    await db.clients.update_many({"contact_name": {"$exists": False}, "name": {"$exists": True}}, {"$rename": {"name": "contact_name"}})
-    await db.clients.update_many({"company_name": {"$exists": False}, "company": {"$exists": True}}, {"$rename": {"company": "company_name"}})
+    await db.clients.update_many(
+        {"contact_name": {"$exists": False}, "name": {"$exists": True}}, {"$rename": {"name": "contact_name"}}
+    )
+    await db.clients.update_many(
+        {"company_name": {"$exists": False}, "company": {"$exists": True}},
+        {"$rename": {"company": "company_name"}},
+    )
     await db.clients.update_many({"language": {"$exists": False}}, {"$set": {"language": "English"}})
 
     # Proposals: value -> value_inr, sent_at -> sent_date, last_contact_at -> last_contact_date
-    await db.proposals.update_many({"value_inr": {"$exists": False}, "value": {"$exists": True}}, {"$rename": {"value": "value_inr"}})
-    await db.proposals.update_many({"sent_date": {"$exists": False}, "sent_at": {"$exists": True}}, {"$rename": {"sent_at": "sent_date"}})
-    await db.proposals.update_many({"last_contact_date": {"$exists": False}, "last_contact_at": {"$exists": True}}, {"$rename": {"last_contact_at": "last_contact_date"}})
+    await db.proposals.update_many(
+        {"value_inr": {"$exists": False}, "value": {"$exists": True}}, {"$rename": {"value": "value_inr"}}
+    )
+    await db.proposals.update_many(
+        {"sent_date": {"$exists": False}, "sent_at": {"$exists": True}}, {"$rename": {"sent_at": "sent_date"}}
+    )
+    await db.proposals.update_many(
+        {"last_contact_date": {"$exists": False}, "last_contact_at": {"$exists": True}},
+        {"$rename": {"last_contact_at": "last_contact_date"}},
+    )
     # manual_status -> stage (best-effort: won/lost/dead map to stage)
     async for p in db.proposals.find({"stage": {"$exists": False}}):
         ms = p.get("manual_status")
         stage = "won" if ms == "won" else "lost" if ms == "lost" else "sent"
-        await db.proposals.update_one({"id": p["id"]}, {"$set": {"stage": stage}, "$unset": {"manual_status": ""}})
+        await db.proposals.update_one(
+            {"id": p["id"]}, {"$set": {"stage": stage}, "$unset": {"manual_status": ""}}
+        )
 
     # Invoices: invoice_number -> invoice_no, amount -> amount_inr, paid_at -> paid_date
-    await db.invoices.update_many({"invoice_no": {"$exists": False}, "invoice_number": {"$exists": True}}, {"$rename": {"invoice_number": "invoice_no"}})
-    await db.invoices.update_many({"amount_inr": {"$exists": False}, "amount": {"$exists": True}}, {"$rename": {"amount": "amount_inr"}})
-    await db.invoices.update_many({"paid_date": {"$exists": False}, "paid_at": {"$exists": True}}, {"$rename": {"paid_at": "paid_date"}})
+    await db.invoices.update_many(
+        {"invoice_no": {"$exists": False}, "invoice_number": {"$exists": True}},
+        {"$rename": {"invoice_number": "invoice_no"}},
+    )
+    await db.invoices.update_many(
+        {"amount_inr": {"$exists": False}, "amount": {"$exists": True}}, {"$rename": {"amount": "amount_inr"}}
+    )
+    await db.invoices.update_many(
+        {"paid_date": {"$exists": False}, "paid_at": {"$exists": True}}, {"$rename": {"paid_at": "paid_date"}}
+    )
 
     # Activities: kind -> channel, proposal_id/invoice_id -> related_type/related_id
-    await db.activities.update_many({"channel": {"$exists": False}, "kind": {"$exists": True}}, {"$rename": {"kind": "channel"}})
+    await db.activities.update_many(
+        {"channel": {"$exists": False}, "kind": {"$exists": True}}, {"$rename": {"kind": "channel"}}
+    )
     async for a in db.activities.find({"related_type": {"$exists": False}}):
         rt, rid = None, None
         if a.get("proposal_id"):
@@ -1019,14 +1204,17 @@ async def seed_admin():
         logger.warning("ADMIN_PASSWORD not set and no admin user exists — skipping admin seed.")
         return
     user_id = str(uuid.uuid4())
-    await users_repo.insert({
-        "id": user_id, "email": admin_email,
-        "name": "ByteHubble Founder",
-        "auth_provider": "email",
-        "password_hash": hash_password(admin_password),
-        "token_version": 0,
-        "created_at": now_utc().isoformat(),
-    })
+    await users_repo.insert(
+        {
+            "id": user_id,
+            "email": admin_email,
+            "name": "ByteHubble Founder",
+            "auth_provider": "email",
+            "password_hash": hash_password(admin_password),
+            "token_version": 0,
+            "created_at": now_utc().isoformat(),
+        }
+    )
     await seed_demo_for_owner(owner_id=user_id)
 
 
@@ -1049,7 +1237,9 @@ async def add_security_headers(request: Request, call_next):
     return response
 
 
-_cors_origins = [o.strip() for o in os.environ.get('CORS_ORIGINS', 'http://localhost:3000').split(',') if o.strip()]
+_cors_origins = [
+    o.strip() for o in os.environ.get("CORS_ORIGINS", "http://localhost:3000").split(",") if o.strip()
+]
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_origins,
@@ -1058,7 +1248,7 @@ app.add_middleware(
     allow_headers=["Authorization", "Content-Type"],
 )
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
 
@@ -1086,8 +1276,11 @@ async def on_startup():
         await migrate_legacy_fields()
     await load_signing_key()
     await seed_admin()
-    logger.info("Revora ready (engine=%s, audit key fp=%s).",
-                "postgres" if is_postgres() else "mongo", get_public_key_fp())
+    logger.info(
+        "Revora ready (engine=%s, audit key fp=%s).",
+        "postgres" if is_postgres() else "mongo",
+        get_public_key_fp(),
+    )
 
 
 @app.on_event("shutdown")

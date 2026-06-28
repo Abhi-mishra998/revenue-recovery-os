@@ -7,9 +7,11 @@ API-level isolation tests happen to still pass for other reasons.
 
 Skips cleanly if POSTGRES_URL isn't reachable.
 """
+
 import asyncio
 import os
 import uuid
+
 import pytest
 
 POSTGRES_URL = os.environ.get("POSTGRES_URL")
@@ -24,15 +26,18 @@ def _run(coro):
 # 'no current event loop' clash you get when reusing an asyncpg.Pool across
 # asyncio.run() calls.
 
+
 async def _connect():
     import asyncpg
+
     return await asyncpg.connect(POSTGRES_URL, timeout=5)
 
 
 async def _set_role_and_user(conn, user_id: str) -> None:
     await conn.execute("SET LOCAL ROLE revora_app")
     await conn.execute(
-        "SELECT set_config('app.current_user_id', $1, true)", user_id,
+        "SELECT set_config('app.current_user_id', $1, true)",
+        user_id,
     )
 
 
@@ -45,7 +50,10 @@ async def _make_two_users() -> tuple[str, str]:
                 "INSERT INTO users (id, email, created_at) VALUES "
                 "($1::uuid, $2, '2026-06-28T00:00:00+00:00'), "
                 "($3::uuid, $4, '2026-06-28T00:00:00+00:00')",
-                u1, f"rls-{u1[:6]}@x", u2, f"rls-{u2[:6]}@x",
+                u1,
+                f"rls-{u1[:6]}@x",
+                u2,
+                f"rls-{u2[:6]}@x",
             )
     finally:
         await conn.close()
@@ -71,7 +79,9 @@ async def _insert_client_as(user_id: str, label: str = "Co") -> str:
                 "INSERT INTO clients (id, owner_id, company_name, contact_name, "
                 "language, created_at) VALUES ($1::uuid, $2::uuid, $3, 'Tester', "
                 "'English', '2026-06-28T00:00:00+00:00')",
-                cid, user_id, label,
+                cid,
+                user_id,
+                label,
             )
     finally:
         await conn.close()
@@ -79,6 +89,7 @@ async def _insert_client_as(user_id: str, label: str = "Co") -> str:
 
 
 # ----------------------------------------------------------------------------
+
 
 class TestClientsRls:
     def test_other_user_cannot_see_my_client(self):
@@ -92,7 +103,8 @@ class TestClientsRls:
                     async with conn.transaction():
                         await _set_role_and_user(conn, user_id)
                         return await conn.fetchval(
-                            "SELECT count(*) FROM clients WHERE id = $1::uuid", cid,
+                            "SELECT count(*) FROM clients WHERE id = $1::uuid",
+                            cid,
                         )
                 finally:
                     await conn.close()
@@ -113,7 +125,8 @@ class TestClientsRls:
                     async with conn.transaction():
                         await _set_role_and_user(conn, u2)
                         return await conn.execute(
-                            "UPDATE clients SET company_name = 'pwned' WHERE id = $1::uuid", cid,
+                            "UPDATE clients SET company_name = 'pwned' WHERE id = $1::uuid",
+                            cid,
                         )
                 finally:
                     await conn.close()
@@ -126,7 +139,8 @@ class TestClientsRls:
                     async with conn.transaction():
                         await _set_role_and_user(conn, u1)
                         return await conn.fetchval(
-                            "SELECT company_name FROM clients WHERE id = $1::uuid", cid,
+                            "SELECT company_name FROM clients WHERE id = $1::uuid",
+                            cid,
                         )
                 finally:
                     await conn.close()
@@ -146,7 +160,8 @@ class TestClientsRls:
                     async with conn.transaction():
                         await _set_role_and_user(conn, u2)
                         return await conn.execute(
-                            "DELETE FROM clients WHERE id = $1::uuid", cid,
+                            "DELETE FROM clients WHERE id = $1::uuid",
+                            cid,
                         )
                 finally:
                     await conn.close()
@@ -159,7 +174,8 @@ class TestClientsRls:
                     async with conn.transaction():
                         await _set_role_and_user(conn, u1)
                         return await conn.fetchval(
-                            "SELECT count(*) FROM clients WHERE id = $1::uuid", cid,
+                            "SELECT count(*) FROM clients WHERE id = $1::uuid",
+                            cid,
                         )
                 finally:
                     await conn.close()
@@ -184,7 +200,8 @@ class TestClientsRls:
                             "INSERT INTO clients (id, owner_id, company_name, contact_name, "
                             "language, created_at) VALUES ($1::uuid, $2::uuid, 'X', 'Y', "
                             "'English', '2026-06-28T00:00:00+00:00')",
-                            cid, u2,
+                            cid,
+                            u2,
                         )
                 finally:
                     await conn.close()
@@ -213,7 +230,9 @@ class TestProposalsRls:
                             "VALUES ($1::uuid, $2::uuid, $3::uuid, 'p', 1000, "
                             "'2026-06-28T00:00:00+00:00', '2026-06-28T00:00:00+00:00', "
                             "'sent', '2026-06-28T00:00:00+00:00')",
-                            pid, u1, cid,
+                            pid,
+                            u1,
+                            cid,
                         )
                 finally:
                     await conn.close()
@@ -226,7 +245,8 @@ class TestProposalsRls:
                     async with conn.transaction():
                         await _set_role_and_user(conn, u2)
                         return await conn.fetchval(
-                            "SELECT count(*) FROM proposals WHERE id = $1::uuid", pid,
+                            "SELECT count(*) FROM proposals WHERE id = $1::uuid",
+                            pid,
                         )
                 finally:
                     await conn.close()

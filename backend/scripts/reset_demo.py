@@ -12,6 +12,7 @@ Notes
 Only the demo content (clients, proposals, invoices, activities) for the target
 owner is touched. The user account itself is preserved so you can log in immediately.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -27,6 +28,7 @@ load_dotenv(ROOT / ".env")
 sys.path.insert(0, str(ROOT))
 
 from motor.motor_asyncio import AsyncIOMotorClient  # noqa: E402
+
 from services.seed import reset_demo_data_for_owner, seed_demo_for_owner  # noqa: E402
 
 
@@ -43,7 +45,9 @@ async def main():
 
     user = await db.users.find_one({"email": args.email.lower()})
     if not user:
-        print(f"[reset_demo] No user found with email {args.email!r}. Run the server once first to seed the admin.")
+        print(
+            f"[reset_demo] No user found with email {args.email!r}. Run the server once first to seed the admin."
+        )
         return 1
 
     owner_id = user["id"]

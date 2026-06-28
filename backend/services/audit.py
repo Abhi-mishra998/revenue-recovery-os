@@ -20,6 +20,7 @@ Signing key resolution order:
   2. settings.audit_signing_key in Mongo — auto-generated on first start,
      with a loud WARNING. Convenient for dev, not for prod.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -73,11 +74,20 @@ def _payload_hash(payload: Any) -> str:
 
 
 def _record_blob(rec: dict) -> dict:
-    return {k: rec[k] for k in (
-        "seq", "actor_id", "actor_email", "action",
-        "resource_type", "resource_id", "payload_hash",
-        "prev_hash", "timestamp",
-    )}
+    return {
+        k: rec[k]
+        for k in (
+            "seq",
+            "actor_id",
+            "actor_email",
+            "action",
+            "resource_type",
+            "resource_id",
+            "payload_hash",
+            "prev_hash",
+            "timestamp",
+        )
+    }
 
 
 def _key_fingerprint(public_key: Ed25519PublicKey) -> str:
@@ -162,9 +172,9 @@ async def append_audit(
             "timestamp": _now_iso(),
         }
         rec["record_hash"] = _sha256_hex(_canonical_json(_record_blob(rec)))
-        rec["signature"] = base64.b64encode(
-            _signing_key.sign(rec["record_hash"].encode("utf-8"))
-        ).decode("ascii")
+        rec["signature"] = base64.b64encode(_signing_key.sign(rec["record_hash"].encode("utf-8"))).decode(
+            "ascii"
+        )
         rec["public_key_fp"] = _public_key_fp
         await audit_log_repo.insert(rec)
         return rec

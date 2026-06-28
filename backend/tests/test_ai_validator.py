@@ -10,12 +10,13 @@ The provider returns a queue of pre-canned responses, letting us exercise:
   - malformed both → raises MalformedOutputError
   - schema-violation both → raises MalformedOutputError
 """
+
 import asyncio
+
 import pytest
 
-from services.ai.client import PROVIDERS, generate_json, MalformedOutputError
+from services.ai.client import PROVIDERS, MalformedOutputError, generate_json
 from services.ai.schemas import FollowUpDraft
-
 
 VALID_DRAFT = {
     "whatsapp_text": "Hi Priya, quick nudge on the Nexora catalog redesign proposal we sent last week. Happy to chat. - Rohan",
@@ -34,7 +35,9 @@ class StubProvider:
 
     async def generate_text(self, **_):
         if self.calls >= len(self.responses):
-            raise AssertionError(f"Stub called {self.calls+1} times but only {len(self.responses)} responses queued")
+            raise AssertionError(
+                f"Stub called {self.calls + 1} times but only {len(self.responses)} responses queued"
+            )
         r = self.responses[self.calls]
         self.calls += 1
         return r
@@ -43,8 +46,10 @@ class StubProvider:
 @pytest.fixture
 def register_stub():
     """Yields a function to register a stub and clean it up after."""
+
     def _register(stub):
         PROVIDERS["__test_stub__"] = stub
+
     yield _register
     PROVIDERS.pop("__test_stub__", None)
 
@@ -55,6 +60,7 @@ def _run(coro):
 
 def _valid_json() -> str:
     import json
+
     return json.dumps(VALID_DRAFT)
 
 
@@ -92,6 +98,7 @@ class TestRetryPath:
 
     def test_schema_violation_first_valid_second(self, register_stub):
         import json
+
         bad = json.dumps({"whatsapp_text": "x", "email_subject": "ok", "email_body": "short"})  # too short
         stub = StubProvider([bad, _valid_json()])
         register_stub(stub)
@@ -110,6 +117,7 @@ class TestFailures:
 
     def test_schema_violation_twice_raises(self, register_stub):
         import json
+
         bad = json.dumps({"whatsapp_text": "x", "email_subject": "z", "email_body": "no"})
         stub = StubProvider([bad, bad])
         register_stub(stub)

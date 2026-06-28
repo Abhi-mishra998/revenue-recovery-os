@@ -1,9 +1,11 @@
 """Revora — Revenue Recovery OS backend API tests (schema v2)."""
+
 import os
 import uuid
+from datetime import datetime, timedelta, timezone
+
 import pytest
 import requests
-from datetime import datetime, timezone, timedelta
 
 BASE_URL = os.environ["REACT_APP_BACKEND_URL"].rstrip("/")
 API = f"{BASE_URL}/api"
@@ -23,7 +25,9 @@ def _iso_ahead(days: int) -> str:
 # ---------- Fixtures ----------
 @pytest.fixture(scope="session")
 def auth_token():
-    r = requests.post(f"{API}/auth/login", json={"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD}, timeout=30)
+    r = requests.post(
+        f"{API}/auth/login", json={"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD}, timeout=30
+    )
     assert r.status_code == 200, f"login failed: {r.status_code} {r.text}"
     data = r.json()
     assert isinstance(data["token"], str) and len(data["token"]) > 10
@@ -59,19 +63,27 @@ class TestAuth:
 
     def test_register_then_login(self):
         email = f"test_{uuid.uuid4().hex[:8]}@example.com"
-        r = requests.post(f"{API}/auth/register", json={"email": email, "password": "Pw1234!!", "name": "TestUser"}, timeout=15)
+        r = requests.post(
+            f"{API}/auth/register",
+            json={"email": email, "password": "Pw1234!!", "name": "TestUser"},
+            timeout=15,
+        )
         assert r.status_code == 200
         d = r.json()
         assert d["user"]["auth_provider"] == "email"
         # Duplicate
-        r2 = requests.post(f"{API}/auth/register", json={"email": email, "password": "Pw1234!!", "name": "X"}, timeout=15)
+        r2 = requests.post(
+            f"{API}/auth/register", json={"email": email, "password": "Pw1234!!", "name": "X"}, timeout=15
+        )
         assert r2.status_code == 400
         # Login back
         r3 = requests.post(f"{API}/auth/login", json={"email": email, "password": "Pw1234!!"}, timeout=15)
         assert r3.status_code == 200
 
     def test_google_session_bad(self):
-        r = requests.post(f"{API}/auth/google/session", json={"session_id": f"bogus-{uuid.uuid4().hex}"}, timeout=20)
+        r = requests.post(
+            f"{API}/auth/google/session", json={"session_id": f"bogus-{uuid.uuid4().hex}"}, timeout=20
+        )
         assert r.status_code in (401, 502), f"expected 401/502, got {r.status_code}: {r.text}"
 
 
@@ -79,7 +91,11 @@ class TestAuth:
 class TestAuthorization:
     def test_other_user_sees_empty(self):
         email = f"iso_{uuid.uuid4().hex[:8]}@example.com"
-        r = requests.post(f"{API}/auth/register", json={"email": email, "password": "Pw1234!!", "name": "IsoUser"}, timeout=15)
+        r = requests.post(
+            f"{API}/auth/register",
+            json={"email": email, "password": "Pw1234!!", "name": "IsoUser"},
+            timeout=15,
+        )
         token = r.json()["token"]
         s = requests.Session()
         s.headers.update({"Authorization": f"Bearer {token}"})
@@ -94,8 +110,15 @@ class TestDashboard:
         r = client.get(f"{API}/dashboard/summary", timeout=15)
         assert r.status_code == 200
         d = r.json()
-        for k in ["total_pipeline_inr", "cold_proposals_count", "overdue_invoices_count",
-                  "overdue_invoices_inr", "revenue_at_risk_inr", "by_status", "by_stage"]:
+        for k in [
+            "total_pipeline_inr",
+            "cold_proposals_count",
+            "overdue_invoices_count",
+            "overdue_invoices_inr",
+            "revenue_at_risk_inr",
+            "by_status",
+            "by_stage",
+        ]:
             assert k in d
         # Expected from seed (11 proposals in sent/negotiating: 3 active + 6 cold + 2 dead)
         assert d["total_pipeline_inr"] == 3775000
@@ -121,7 +144,7 @@ class TestClients:
             "phone": "+91 99000 00000",
             "whatsapp": "+91 99000 00000",
             "industry": "Testing",
-            "notes": "ephemeral"
+            "notes": "ephemeral",
         }
         r = client.post(f"{API}/clients", json=payload, timeout=15)
         assert r.status_code == 200, r.text
@@ -151,14 +174,18 @@ class TestProposals:
         cid = client.get(f"{API}/clients", timeout=15).json()[0]["id"]
         cases = [(3, "active"), (14, "cold"), (30, "dead")]
         for days, expected in cases:
-            r = client.post(f"{API}/proposals", json={
-                "client_id": cid,
-                "title": f"TEST_Prop_{expected}_{uuid.uuid4().hex[:5]}",
-                "value_inr": 50000,
-                "sent_date": _iso_ago(days),
-                "last_contact_date": _iso_ago(days),
-                "stage": "sent",
-            }, timeout=15)
+            r = client.post(
+                f"{API}/proposals",
+                json={
+                    "client_id": cid,
+                    "title": f"TEST_Prop_{expected}_{uuid.uuid4().hex[:5]}",
+                    "value_inr": 50000,
+                    "sent_date": _iso_ago(days),
+                    "last_contact_date": _iso_ago(days),
+                    "stage": "sent",
+                },
+                timeout=15,
+            )
             assert r.status_code == 200, r.text
             d = r.json()
             assert d["status"] == expected, f"days={days} expected={expected} got={d['status']}"
@@ -166,12 +193,20 @@ class TestProposals:
 
     def test_update_persistence(self, client):
         cid = client.get(f"{API}/clients", timeout=15).json()[0]["id"]
-        r = client.post(f"{API}/proposals", json={
-            "client_id": cid, "title": f"TEST_{uuid.uuid4().hex[:5]}",
-            "value_inr": 111, "stage": "sent"
-        }, timeout=15)
+        r = client.post(
+            f"{API}/proposals",
+            json={
+                "client_id": cid,
+                "title": f"TEST_{uuid.uuid4().hex[:5]}",
+                "value_inr": 111,
+                "stage": "sent",
+            },
+            timeout=15,
+        )
         pid = r.json()["id"]
-        u = client.patch(f"{API}/proposals/{pid}", json={"stage": "negotiating", "value_inr": 222}, timeout=15)
+        u = client.patch(
+            f"{API}/proposals/{pid}", json={"stage": "negotiating", "value_inr": 222}, timeout=15
+        )
         assert u.json()["stage"] == "negotiating" and u.json()["value_inr"] == 222
         g = client.get(f"{API}/proposals/{pid}", timeout=15).json()
         assert g["stage"] == "negotiating" and g["value_inr"] == 222
@@ -191,22 +226,30 @@ class TestInvoices:
     def _own_client(self, client) -> str:
         """Create a fresh client owned by the test session — avoids racing
         with TestClients on the alphabetically-first existing client."""
-        r = client.post(f"{API}/clients", json={
-            "company_name": f"INV_TEST_{uuid.uuid4().hex[:6]}",
-            "contact_name": "Inv Tester",
-        }, timeout=15)
+        r = client.post(
+            f"{API}/clients",
+            json={
+                "company_name": f"INV_TEST_{uuid.uuid4().hex[:6]}",
+                "contact_name": "Inv Tester",
+            },
+            timeout=15,
+        )
         assert r.status_code == 200, r.text
         return r.json()["id"]
 
     def test_overdue_and_mark_paid(self, client):
         cid = self._own_client(client)
         try:
-            r = client.post(f"{API}/invoices", json={
-                "client_id": cid,
-                "invoice_no": f"TEST-{uuid.uuid4().hex[:5]}",
-                "amount_inr": 50000,
-                "due_date": _iso_ago(10),
-            }, timeout=15)
+            r = client.post(
+                f"{API}/invoices",
+                json={
+                    "client_id": cid,
+                    "invoice_no": f"TEST-{uuid.uuid4().hex[:5]}",
+                    "amount_inr": 50000,
+                    "due_date": _iso_ago(10),
+                },
+                timeout=15,
+            )
             assert r.status_code == 200, r.text
             inv = r.json()
             assert inv["status"] == "overdue"
@@ -222,12 +265,16 @@ class TestInvoices:
     def test_unpaid_future(self, client):
         cid = self._own_client(client)
         try:
-            r = client.post(f"{API}/invoices", json={
-                "client_id": cid,
-                "invoice_no": f"TEST-{uuid.uuid4().hex[:5]}",
-                "amount_inr": 10000,
-                "due_date": _iso_ahead(5),
-            }, timeout=15)
+            r = client.post(
+                f"{API}/invoices",
+                json={
+                    "client_id": cid,
+                    "invoice_no": f"TEST-{uuid.uuid4().hex[:5]}",
+                    "amount_inr": 10000,
+                    "due_date": _iso_ahead(5),
+                },
+                timeout=15,
+            )
             assert r.status_code == 200, r.text
             inv = r.json()
             assert inv["status"] == "unpaid"

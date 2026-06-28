@@ -14,6 +14,7 @@ Tokens are bracketed so they look nothing like normal template placeholders
 ({{ }}, %s, ${...}) — minimises the chance a model will 'helpfully' replace
 them. Format: [REDACTED:KIND_N]
 """
+
 from __future__ import annotations
 
 import re
@@ -21,13 +22,13 @@ from typing import Pattern
 
 # Order matters: more specific patterns first (PAN before generic digits).
 _PATTERNS: list[tuple[str, Pattern[str]]] = [
-    ("EMAIL",   re.compile(r"\b[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}\b")),
-    ("GSTIN",   re.compile(r"\b\d{2}[A-Z]{5}\d{4}[A-Z][A-Z\d]Z[A-Z\d]\b")),
-    ("PAN",     re.compile(r"\b[A-Z]{5}\d{4}[A-Z]\b")),
+    ("EMAIL", re.compile(r"\b[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}\b")),
+    ("GSTIN", re.compile(r"\b\d{2}[A-Z]{5}\d{4}[A-Z][A-Z\d]Z[A-Z\d]\b")),
+    ("PAN", re.compile(r"\b[A-Z]{5}\d{4}[A-Z]\b")),
     ("AADHAAR", re.compile(r"\b\d{4}\s?\d{4}\s?\d{4}\b")),
-    ("CC",      re.compile(r"\b(?:\d[ -]?){13,19}\b")),
+    ("CC", re.compile(r"\b(?:\d[ -]?){13,19}\b")),
     # Phone last — broadest digit pattern, narrowed to Indian/international formats.
-    ("PHONE",   re.compile(r"\+?(?:\d[\s-]?){10,14}")),
+    ("PHONE", re.compile(r"\+?(?:\d[\s-]?){10,14}")),
 ]
 
 TOKEN_RE = re.compile(r"\[REDACTED:[A-Z]+_\d+\]")
@@ -40,11 +41,15 @@ def redact(text: str) -> tuple[str, dict[str, str]]:
     token_map: dict[str, str] = {}
     out = text
     for kind, pat in _PATTERNS:
-        def _sub(m: re.Match) -> str:
-            counters[kind] = counters.get(kind, 0) + 1
-            tok = f"[REDACTED:{kind}_{counters[kind]}]"
+        # Bind `kind` via default arg so ruff B023 stays quiet — the closure
+        # is consumed inside the same iteration (pat.sub runs synchronously),
+        # but the explicit bind documents intent + costs zero at runtime.
+        def _sub(m: re.Match, _kind: str = kind) -> str:
+            counters[_kind] = counters.get(_kind, 0) + 1
+            tok = f"[REDACTED:{_kind}_{counters[_kind]}]"
             token_map[tok] = m.group(0)
             return tok
+
         out = pat.sub(_sub, out)
     return out, token_map
 

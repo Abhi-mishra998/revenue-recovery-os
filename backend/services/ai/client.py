@@ -10,6 +10,7 @@ Active provider is chosen by:
   2. AI_PROVIDER env var
   3. DEFAULT_PROVIDER constant
 """
+
 from __future__ import annotations
 
 import json
@@ -40,14 +41,20 @@ class LLMProvider(Protocol):
     default_model: str
 
     async def generate_text(
-        self, *, system: str, user: str, model: Optional[str] = None,
-        max_tokens: int = 1500, session_id: Optional[str] = None,
+        self,
+        *,
+        system: str,
+        user: str,
+        model: Optional[str] = None,
+        max_tokens: int = 1500,
+        session_id: Optional[str] = None,
     ) -> str: ...
 
 
 # ---------- Emergent gateway (default) ----------
 class _EmergentProvider:
     """Routes Gemini and Anthropic calls through the Emergent Universal LLM key."""
+
     def __init__(self, vendor: str, default_model: str):
         self.name = f"emergent_{vendor}"
         self._vendor = vendor
@@ -61,13 +68,12 @@ class _EmergentProvider:
 
     async def generate_text(self, *, system, user, model=None, max_tokens=1500, session_id=None) -> str:
         from emergentintegrations.llm.chat import LlmChat, UserMessage  # lazy: keep import out of cold path
-        chat = (
-            LlmChat(
-                api_key=self._api_key(),
-                session_id=session_id or f"revora-{uuid.uuid4()}",
-                system_message=system,
-            ).with_model(self._vendor, model or self.default_model)
-        )
+
+        chat = LlmChat(
+            api_key=self._api_key(),
+            session_id=session_id or f"revora-{uuid.uuid4()}",
+            system_message=system,
+        ).with_model(self._vendor, model or self.default_model)
         text = await chat.send_message(UserMessage(text=user))
         return (text or "").strip()
 
@@ -88,7 +94,8 @@ class _GeminiDirectProvider:
         genai.configure(api_key=key)
         m = genai.GenerativeModel(model or self.default_model, system_instruction=system)
         resp = await m.generate_content_async(
-            user, generation_config={"max_output_tokens": max_tokens},
+            user,
+            generation_config={"max_output_tokens": max_tokens},
         )
         return (resp.text or "").strip()
 
@@ -138,11 +145,11 @@ class _AnthropicDirectProvider:
 
 # ---------- Registry ----------
 PROVIDERS: dict[str, LLMProvider] = {
-    "emergent_gemini":    _EmergentProvider("gemini", "gemini-2.5-flash"),
+    "emergent_gemini": _EmergentProvider("gemini", "gemini-2.5-flash"),
     "emergent_anthropic": _EmergentProvider("anthropic", "claude-haiku-4-5-20251001"),
-    "gemini":             _GeminiDirectProvider(),
-    "openai":             _OpenAIDirectProvider(),
-    "anthropic":          _AnthropicDirectProvider(),
+    "gemini": _GeminiDirectProvider(),
+    "openai": _OpenAIDirectProvider(),
+    "anthropic": _AnthropicDirectProvider(),
 }
 
 DEFAULT_PROVIDER = "emergent_gemini"
@@ -156,14 +163,21 @@ def get_provider(name: Optional[str] = None) -> LLMProvider:
 
 
 async def generate_text(
-    *, system: str, user: str,
-    provider: Optional[str] = None, model: Optional[str] = None,
-    max_tokens: int = 1500, session_id: Optional[str] = None,
+    *,
+    system: str,
+    user: str,
+    provider: Optional[str] = None,
+    model: Optional[str] = None,
+    max_tokens: int = 1500,
+    session_id: Optional[str] = None,
 ) -> str:
     """Backwards-compatible top-level text generation."""
     return await get_provider(provider).generate_text(
-        system=system, user=user, model=model,
-        max_tokens=max_tokens, session_id=session_id,
+        system=system,
+        user=user,
+        model=model,
+        max_tokens=max_tokens,
+        session_id=session_id,
     )
 
 
@@ -187,9 +201,14 @@ def _extract_json(text: str) -> str:
 
 
 async def generate_json(
-    *, system: str, user: str, schema: Type[T],
-    provider: Optional[str] = None, model: Optional[str] = None,
-    max_tokens: int = 1500, session_id: Optional[str] = None,
+    *,
+    system: str,
+    user: str,
+    schema: Type[T],
+    provider: Optional[str] = None,
+    model: Optional[str] = None,
+    max_tokens: int = 1500,
+    session_id: Optional[str] = None,
 ) -> T:
     """
     Ask the model for a JSON object that validates against `schema`. One
@@ -209,8 +228,11 @@ async def generate_json(
                 "no prose, no code fences, no commentary."
             )
         raw = await p.generate_text(
-            system=sys_msg, user=user, model=model,
-            max_tokens=max_tokens, session_id=session_id,
+            system=sys_msg,
+            user=user,
+            model=model,
+            max_tokens=max_tokens,
+            session_id=session_id,
         )
         last_raw = raw
         try:
@@ -218,8 +240,9 @@ async def generate_json(
             return schema.model_validate(obj)
         except (json.JSONDecodeError, ValidationError) as e:
             last_err = e
-            logger.warning("structured-output attempt %d failed (%s): %s",
-                           attempt, type(e).__name__, str(e)[:200])
+            logger.warning(
+                "structured-output attempt %d failed (%s): %s", attempt, type(e).__name__, str(e)[:200]
+            )
 
     raise MalformedOutputError(
         f"Model returned invalid output after retry. Last error: {last_err!r}. "

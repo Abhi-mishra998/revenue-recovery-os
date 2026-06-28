@@ -2,6 +2,7 @@
 clients repo. All methods are tenant-scoped — owner_id is required and the
 postgres path runs inside with_user(owner_id) so RLS enforces it physically.
 """
+
 from __future__ import annotations
 
 from typing import Optional
@@ -10,13 +11,24 @@ from .. import is_postgres, pg
 from . import _mongo
 from ._pg_serde import row_to_dict, rows_to_dicts
 
-
-_COLS = ("id::text", "owner_id::text", "company_name", "contact_name",
-         "email", "phone", "whatsapp", "industry", "language", "notes", "created_at")
+_COLS = (
+    "id::text",
+    "owner_id::text",
+    "company_name",
+    "contact_name",
+    "email",
+    "phone",
+    "whatsapp",
+    "industry",
+    "language",
+    "notes",
+    "created_at",
+)
 _COLS_SQL = ", ".join(_COLS)
 
 
 # ---------- public surface ----------
+
 
 async def list_for_owner(owner_id: str) -> list[dict]:
     if is_postgres():
@@ -40,9 +52,13 @@ async def exists_for_owner(client_id: str, owner_id: str) -> bool:
         async with pg.with_user(owner_id) as conn:
             v = await conn.fetchval("SELECT 1 FROM clients WHERE id = $1::uuid LIMIT 1", client_id)
         return v is not None
-    return await _mongo.db().clients.find_one(
-        {"id": client_id, "owner_id": owner_id}, {"_id": 1},
-    ) is not None
+    return (
+        await _mongo.db().clients.find_one(
+            {"id": client_id, "owner_id": owner_id},
+            {"_id": 1},
+        )
+        is not None
+    )
 
 
 async def insert(doc: dict) -> None:
@@ -52,9 +68,17 @@ async def insert(doc: dict) -> None:
                 "INSERT INTO clients (id, owner_id, company_name, contact_name, email, phone, whatsapp, "
                 "industry, language, notes, created_at) "
                 "VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
-                doc["id"], doc["owner_id"], doc["company_name"], doc["contact_name"],
-                doc.get("email"), doc.get("phone"), doc.get("whatsapp"), doc.get("industry"),
-                doc.get("language") or "English", doc.get("notes"), doc["created_at"],
+                doc["id"],
+                doc["owner_id"],
+                doc["company_name"],
+                doc["contact_name"],
+                doc.get("email"),
+                doc.get("phone"),
+                doc.get("whatsapp"),
+                doc.get("industry"),
+                doc.get("language") or "English",
+                doc.get("notes"),
+                doc["created_at"],
             )
         return
     await _mongo.db().clients.insert_one(dict(doc))
@@ -69,11 +93,14 @@ async def update_for_owner(client_id: str, owner_id: str, updates: dict) -> bool
         async with pg.with_user(owner_id) as conn:
             res = await conn.execute(
                 f"UPDATE clients SET {sets} WHERE id = $1::uuid AND owner_id = $2::uuid",
-                client_id, owner_id, *params,
+                client_id,
+                owner_id,
+                *params,
             )
         return _parse_rowcount(res) > 0
     res = await _mongo.db().clients.update_one(
-        {"id": client_id, "owner_id": owner_id}, {"$set": updates},
+        {"id": client_id, "owner_id": owner_id},
+        {"$set": updates},
     )
     return res.matched_count > 0
 
@@ -82,7 +109,9 @@ async def delete_for_owner(client_id: str, owner_id: str) -> int:
     if is_postgres():
         async with pg.with_user(owner_id) as conn:
             res = await conn.execute(
-                "DELETE FROM clients WHERE id = $1::uuid AND owner_id = $2::uuid", client_id, owner_id,
+                "DELETE FROM clients WHERE id = $1::uuid AND owner_id = $2::uuid",
+                client_id,
+                owner_id,
             )
         return _parse_rowcount(res)
     res = await _mongo.db().clients.delete_one({"id": client_id, "owner_id": owner_id})
@@ -91,8 +120,16 @@ async def delete_for_owner(client_id: str, owner_id: str) -> int:
 
 # ---------- internal helpers ----------
 
-_CLIENT_UPDATE_COLS = {"company_name", "contact_name", "email", "phone",
-                       "whatsapp", "industry", "language", "notes"}
+_CLIENT_UPDATE_COLS = {
+    "company_name",
+    "contact_name",
+    "email",
+    "phone",
+    "whatsapp",
+    "industry",
+    "language",
+    "notes",
+}
 
 
 def _build_set_clause(updates: dict, *, start_index: int) -> tuple[str, list]:

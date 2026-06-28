@@ -6,8 +6,10 @@ then expect the chain-verify endpoint to detect the tampering. Engine-aware
 storage helper handles both Mongo and Postgres so this works on either
 DB_ENGINE.
 """
+
 import os
 import uuid
+
 import pytest
 import requests
 from pymongo import MongoClient
@@ -30,9 +32,11 @@ def _login(email: str, password: str) -> str:
 
 def _register(prefix: str) -> tuple[str, dict]:
     email = f"{prefix}_{uuid.uuid4().hex[:8]}@example.com"
-    r = requests.post(f"{API}/auth/register",
-                      json={"email": email, "password": "Pw1234!!XY", "name": prefix.title()},
-                      timeout=15)
+    r = requests.post(
+        f"{API}/auth/register",
+        json={"email": email, "password": "Pw1234!!XY", "name": prefix.title()},
+        timeout=15,
+    )
     assert r.status_code == 200, r.text
     return r.json()["token"], r.json()["user"]
 
@@ -61,12 +65,15 @@ class _AuditStorage:
             self.audit_log = self._mongo_client[DB_NAME].audit_log
         else:
             import asyncio
+
             import asyncpg
 
             class _PgAudit:
                 """Subset of the motor Collection API we use in tests."""
+
                 def find_one(_self, filt=None, sort=None):  # noqa: N805
                     filt = filt or {}
+
                     async def _run():
                         conn = await asyncpg.connect(POSTGRES_URL, timeout=5)
                         try:
@@ -78,7 +85,9 @@ class _AuditStorage:
                             sql = "SELECT * FROM audit_log"
                             if where:
                                 sql += " WHERE " + " AND ".join(where)
-                            order = "seq DESC" if sort and sort[0][0] == "seq" and sort[0][1] == -1 else "seq ASC"
+                            order = (
+                                "seq DESC" if sort and sort[0][0] == "seq" and sort[0][1] == -1 else "seq ASC"
+                            )
                             sql += f" ORDER BY {order} LIMIT 1"
                             row = await conn.fetchrow(sql, *params)
                             if not row:
@@ -88,25 +97,32 @@ class _AuditStorage:
                             return d
                         finally:
                             await conn.close()
+
                     return asyncio.run(_run())
 
                 def update_one(_self, filt, update):
                     set_clause = update.get("$set") or {}
+
                     async def _run():
                         conn = await asyncpg.connect(POSTGRES_URL, timeout=5)
                         try:
                             params, sets, where = [], [], []
                             for k, v in set_clause.items():
-                                params.append(v); sets.append(f"{k} = ${len(params)}")
+                                params.append(v)
+                                sets.append(f"{k} = ${len(params)}")
                             for k, v in filt.items():
                                 col = "id::uuid" if k == "_id" else k
                                 params.append(str(v) if k == "_id" else v)
-                                where.append(f"id = ${len(params)}::uuid" if k == "_id" else f"{col} = ${len(params)}")
+                                where.append(
+                                    f"id = ${len(params)}::uuid" if k == "_id" else f"{col} = ${len(params)}"
+                                )
                             sql = f"UPDATE audit_log SET {', '.join(sets)} WHERE {' AND '.join(where)}"
                             await conn.execute(sql, *params)
                         finally:
                             await conn.close()
+
                     asyncio.run(_run())
+
             self.audit_log = _PgAudit()
 
     def close(self):
@@ -135,10 +151,17 @@ class TestChainHappyPath:
 
     def test_state_change_appends_a_record(self, admin_session, mongo_db):
         before = admin_session.get(f"{API}/admin/audit-log?page=1&page_size=1", timeout=15).json()["total"]
-        c = admin_session.post(f"{API}/clients", json={
-            "company_name": f"AUDIT_{uuid.uuid4().hex[:6]}", "contact_name": "Audit Test",
-        }, timeout=15).json()
-        after_total = admin_session.get(f"{API}/admin/audit-log?page=1&page_size=1", timeout=15).json()["total"]
+        c = admin_session.post(
+            f"{API}/clients",
+            json={
+                "company_name": f"AUDIT_{uuid.uuid4().hex[:6]}",
+                "contact_name": "Audit Test",
+            },
+            timeout=15,
+        ).json()
+        after_total = admin_session.get(f"{API}/admin/audit-log?page=1&page_size=1", timeout=15).json()[
+            "total"
+        ]
         assert after_total >= before + 1
         # Find the specific record by resource_id (parallel tests may interleave).
         rec = mongo_db.audit_log.find_one({"resource_id": c["id"], "action": "client.create"})
@@ -152,9 +175,14 @@ class TestTamperDetection:
 
     def _create_then_locate_audit(self, admin_session, mongo_db) -> dict:
         # Create a known record we can find by resource_id
-        c = admin_session.post(f"{API}/clients", json={
-            "company_name": f"TAMPER_{uuid.uuid4().hex[:6]}", "contact_name": "Tamper Test",
-        }, timeout=15).json()
+        c = admin_session.post(
+            f"{API}/clients",
+            json={
+                "company_name": f"TAMPER_{uuid.uuid4().hex[:6]}",
+                "contact_name": "Tamper Test",
+            },
+            timeout=15,
+        ).json()
         rec = mongo_db.audit_log.find_one({"resource_id": c["id"], "action": "client.create"})
         assert rec is not None
         return rec

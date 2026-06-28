@@ -14,6 +14,7 @@ deployment via env vars:
 
 e.g. AI_ROUTE_PROPOSAL_FOLLOWUP_COMPLEX_MODEL=claude-sonnet-4-6
 """
+
 from __future__ import annotations
 
 import os
@@ -49,10 +50,14 @@ class RouteSignals:
 # Default routing table. (task, tier) -> ModelChoice
 _DEFAULTS: dict[tuple[str, Tier], ModelChoice] = {
     ("proposal_followup", Tier.SIMPLE): ModelChoice(
-        Tier.SIMPLE, "emergent_gemini", "gemini-2.5-flash",
+        Tier.SIMPLE,
+        "emergent_gemini",
+        "gemini-2.5-flash",
     ),
     ("proposal_followup", Tier.COMPLEX): ModelChoice(
-        Tier.COMPLEX, "emergent_anthropic", "claude-sonnet-4-6",
+        Tier.COMPLEX,
+        "emergent_anthropic",
+        "claude-sonnet-4-6",
     ),
 }
 

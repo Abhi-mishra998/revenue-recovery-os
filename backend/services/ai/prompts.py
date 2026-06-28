@@ -6,6 +6,7 @@ either the system instruction or the user template; old versions stay in the
 registry so eval runs can A/B them. The active template is whichever PROMPTS
 points at; eval can target a specific id+version pair.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -22,7 +23,7 @@ class PromptTemplate:
     version: int
     description: str
     system: str
-    user_template: str          # str.format with named keys
+    user_template: str  # str.format with named keys
     schema: Type[BaseModel]
     output_format: str = "json"  # "json" | "text"
 
@@ -38,7 +39,7 @@ class PromptTemplate:
 _FOLLOWUP_USER_V1 = (
     "Context:\n{context}\n\n"
     "Write a single JSON object with three string fields:\n"
-    '  whatsapp_text: 3-5 line WhatsApp follow-up under 70 words, polite Indian English,\n'
+    "  whatsapp_text: 3-5 line WhatsApp follow-up under 70 words, polite Indian English,\n"
     "    no emojis, signed off with the sender's first name only, no 'Subject:' line.\n"
     "  email_subject: a single line subject (no 'Re:' prefix).\n"
     "  email_body: 2 short paragraphs (110-180 words total), signed off with the\n"
@@ -91,7 +92,7 @@ FOLLOWUP_V2 = PromptTemplate(
 _FOLLOWUP_USER_V3 = (
     "Context:\n{context}\n\n"
     "Return a single JSON object with these fields:\n"
-    '  whatsapp_text: 3-5 line WhatsApp follow-up under 70 words, polite Indian English,\n'
+    "  whatsapp_text: 3-5 line WhatsApp follow-up under 70 words, polite Indian English,\n"
     "    no emojis, signed off with the sender's first name only, no 'Subject:' line.\n"
     "  email_subject: a single line subject (no 'Re:' prefix).\n"
     "  email_body: 2 short paragraphs (110-180 words total), signed off with the\n"
@@ -121,9 +122,7 @@ ACTIVE: dict[str, PromptTemplate] = {
 }
 
 # All versions, addressable by ref ("proposal_followup@v1") — used by eval harness.
-ALL: dict[str, PromptTemplate] = {
-    t.ref: t for t in (FOLLOWUP_V1, FOLLOWUP_V2, FOLLOWUP_V3)
-}
+ALL: dict[str, PromptTemplate] = {t.ref: t for t in (FOLLOWUP_V1, FOLLOWUP_V2, FOLLOWUP_V3)}
 
 
 def get(id_: str) -> PromptTemplate:

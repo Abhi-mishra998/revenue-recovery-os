@@ -5,6 +5,7 @@ Methods callers actually need:
   get_by_email, get_by_id, insert, bump_token_version,
   set_password_hash, count_for_email
 """
+
 from __future__ import annotations
 
 from typing import Optional
@@ -13,8 +14,8 @@ from .. import is_postgres, pg
 from . import _mongo
 from ._pg_serde import row_to_dict
 
-
 # ---------- public surface ----------
+
 
 async def get_by_email(email: str) -> Optional[dict]:
     if is_postgres():
@@ -48,11 +49,13 @@ async def set_password_hash(user_id: str, password_hash: str) -> None:
 
 # ---------- postgres impls (admin / cross-tenant — bypass RLS) ----------
 
+
 async def _pg_get_by_email(email: str) -> Optional[dict]:
     async with pg.bypass_user() as conn:
         rec = await conn.fetchrow(
             "SELECT id::text, email, name, auth_provider, password_hash, token_version, created_at "
-            "FROM users WHERE email = $1", email,
+            "FROM users WHERE email = $1",
+            email,
         )
     return row_to_dict(rec) if rec else None
 
@@ -61,7 +64,8 @@ async def _pg_get_by_id(user_id: str) -> Optional[dict]:
     async with pg.bypass_user() as conn:
         rec = await conn.fetchrow(
             "SELECT id::text, email, name, auth_provider, password_hash, token_version, created_at "
-            "FROM users WHERE id = $1::uuid", user_id,
+            "FROM users WHERE id = $1::uuid",
+            user_id,
         )
     return row_to_dict(rec) if rec else None
 
@@ -71,7 +75,9 @@ async def _pg_insert(doc: dict) -> None:
         await conn.execute(
             "INSERT INTO users (id, email, name, auth_provider, password_hash, token_version, created_at) "
             "VALUES ($1::uuid, $2, $3, $4, $5, $6, $7)",
-            doc["id"], doc["email"], doc.get("name", ""),
+            doc["id"],
+            doc["email"],
+            doc.get("name", ""),
             doc.get("auth_provider", "email"),
             doc.get("password_hash"),
             int(doc.get("token_version", 0)),
@@ -82,12 +88,15 @@ async def _pg_insert(doc: dict) -> None:
 async def _pg_bump_token_version(user_id: str) -> None:
     async with pg.bypass_user() as conn:
         await conn.execute(
-            "UPDATE users SET token_version = token_version + 1 WHERE id = $1::uuid", user_id,
+            "UPDATE users SET token_version = token_version + 1 WHERE id = $1::uuid",
+            user_id,
         )
 
 
 async def _pg_set_password_hash(user_id: str, password_hash: str) -> None:
     async with pg.bypass_user() as conn:
         await conn.execute(
-            "UPDATE users SET password_hash = $2 WHERE id = $1::uuid", user_id, password_hash,
+            "UPDATE users SET password_hash = $2 WHERE id = $1::uuid",
+            user_id,
+            password_hash,
         )

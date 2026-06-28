@@ -8,6 +8,7 @@ readable by tenants.
 Append-only by convention: no PATCH/DELETE endpoint exists. If you need to
 retract, append a corrective event instead.
 """
+
 from __future__ import annotations
 
 import logging

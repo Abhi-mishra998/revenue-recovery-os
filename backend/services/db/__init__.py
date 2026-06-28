@@ -8,6 +8,7 @@ DB_ENGINE env:
   mongo     — default; the legacy motor path keeps working untouched.
   postgres  — repos route to asyncpg + RLS-aware sessions (services/db/pg.py).
 """
+
 from __future__ import annotations
 
 import os

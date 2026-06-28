@@ -14,6 +14,7 @@ Performance: rebuild for ONE client is bounded by that client's activity +
 event count — typically tens of rows, sub-millisecond. There is no global
 rebuild path on purpose.
 """
+
 from __future__ import annotations
 
 import logging
@@ -93,21 +94,27 @@ async def recompute_client_memory(db=None, *, owner_id: str, client_id: str) -> 
     typical, rate = _derive_response_metrics(activities)
 
     outcome_rows = await events_repo.list_outcomes_for_client(
-        owner_id, client_id, OUTCOME_EVENT_TYPES, limit=10,
+        owner_id,
+        client_id,
+        OUTCOME_EVENT_TYPES,
+        limit=10,
     )
     last_outcomes = [
-        {"type": e["event_type"], "id": e["entity_id"], "at": e["created_at"]}
-        for e in outcome_rows
+        {"type": e["event_type"], "id": e["entity_id"], "at": e["created_at"]} for e in outcome_rows
     ]
 
-    return await memory_repo.upsert(owner_id, client_id, {
-        "channel_preference":    channel_preference,
-        "channel_counts":        channel_counts,
-        "typical_response_days": typical,
-        "response_rate":         rate,
-        "last_outcomes":         last_outcomes,
-        "updated_at":            _now_iso(),
-    })
+    return await memory_repo.upsert(
+        owner_id,
+        client_id,
+        {
+            "channel_preference": channel_preference,
+            "channel_counts": channel_counts,
+            "typical_response_days": typical,
+            "response_rate": rate,
+            "last_outcomes": last_outcomes,
+            "updated_at": _now_iso(),
+        },
+    )
 
 
 async def get_or_compute_client_memory(db=None, *, owner_id: str, client_id: str) -> dict:

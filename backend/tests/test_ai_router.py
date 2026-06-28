@@ -1,9 +1,15 @@
 """Unit tests for the AI model router — pure functions, no LLM."""
+
 import os
+
 import pytest
 
 from services.ai.router import (
-    RouteSignals, Tier, route, pick_tier, HIGH_VALUE_THRESHOLD_INR,
+    HIGH_VALUE_THRESHOLD_INR,
+    RouteSignals,
+    Tier,
+    pick_tier,
+    route,
 )
 
 

@@ -5,8 +5,9 @@ Pure-function tests for the dashboard recovery math.
 extracted body of GET /dashboard/summary — same behaviour, but unit-testable
 without a running backend. These tests pin every number the UI depends on.
 """
+
 import os
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 
 os.environ.setdefault("MONGO_URL", "mongodb://localhost:27017")
 os.environ.setdefault("DB_NAME", "revora_test")
@@ -25,17 +26,24 @@ def iso_ahead(days: int) -> str:
 
 def P(*, id_, client_id, stage="sent", value=10000, last_days_ago=2):
     return {
-        "id": id_, "client_id": client_id, "title": f"prop-{id_}",
-        "stage": stage, "value_inr": value,
+        "id": id_,
+        "client_id": client_id,
+        "title": f"prop-{id_}",
+        "stage": stage,
+        "value_inr": value,
         "last_contact_date": iso_ago(last_days_ago),
         "sent_date": iso_ago(last_days_ago + 1),
     }
 
 
 def I(*, id_, due_days, paid=False, amount=5000):
-    inv = {"id": id_, "client_id": "c", "invoice_no": id_,
-           "amount_inr": amount, "due_date": iso_ago(due_days) if due_days > 0
-                                                else iso_ahead(-due_days)}
+    inv = {
+        "id": id_,
+        "client_id": "c",
+        "invoice_no": id_,
+        "amount_inr": amount,
+        "due_date": iso_ago(due_days) if due_days > 0 else iso_ahead(-due_days),
+    }
     if paid:
         inv["paid_date"] = iso_ago(1)
     return inv
@@ -57,9 +65,9 @@ class TestPipelineBuckets:
     def test_active_cold_dead_sums_match_status_thresholds(self):
         """active ≤7d, cold 8-21d, dead >21d — money totals split accordingly."""
         proposals = [
-            P(id_="p1", client_id="c", value=100, last_days_ago=3),    # active
-            P(id_="p2", client_id="c", value=200, last_days_ago=10),   # cold
-            P(id_="p3", client_id="c", value=400, last_days_ago=30),   # dead
+            P(id_="p1", client_id="c", value=100, last_days_ago=3),  # active
+            P(id_="p2", client_id="c", value=200, last_days_ago=10),  # cold
+            P(id_="p3", client_id="c", value=400, last_days_ago=30),  # dead
         ]
         d = compute_dashboard_summary(proposals, [], {})
         assert d["active_inr"] == 100
@@ -109,8 +117,8 @@ class TestRecoveryFormula:
 class TestOverdue:
     def test_only_past_due_unpaid_counts(self):
         invoices = [
-            I(id_="paid", due_days=10, paid=True),           # paid, ignored
-            I(id_="future", due_days=-5),                    # unpaid future, ignored
+            I(id_="paid", due_days=10, paid=True),  # paid, ignored
+            I(id_="future", due_days=-5),  # unpaid future, ignored
             I(id_="overdue1", due_days=3, amount=500),
             I(id_="overdue2", due_days=10, amount=1500),
         ]
@@ -124,8 +132,8 @@ class TestTopAtRiskRanking:
         """A low-value-very-cold proposal can outrank a high-value-slightly-cold one
         if value × days is bigger."""
         proposals = [
-            P(id_="cheap_old",  client_id="c1", value=100, last_days_ago=30),  # 100 * 30 = 3000
-            P(id_="rich_recent", client_id="c2", value=200, last_days_ago=10), # 200 * 10 = 2000
+            P(id_="cheap_old", client_id="c1", value=100, last_days_ago=30),  # 100 * 30 = 3000
+            P(id_="rich_recent", client_id="c2", value=200, last_days_ago=10),  # 200 * 10 = 2000
         ]
         d = compute_dashboard_summary(proposals, [], {})
         assert [p["id"] for p in d["top_at_risk"]] == ["cheap_old", "rich_recent"]
@@ -138,7 +146,7 @@ class TestTopAtRiskRanking:
     def test_active_proposals_not_in_top_at_risk(self):
         proposals = [
             P(id_="active1", client_id="c", value=999999, last_days_ago=3),  # high $$ but active
-            P(id_="cold1",   client_id="c", value=100,    last_days_ago=10),
+            P(id_="cold1", client_id="c", value=100, last_days_ago=10),
         ]
         d = compute_dashboard_summary(proposals, [], {})
         assert [p["id"] for p in d["top_at_risk"]] == ["cold1"]

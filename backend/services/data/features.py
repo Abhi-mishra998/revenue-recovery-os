@@ -2,6 +2,7 @@
 Feature extraction from raw collections into the dict shape consumed by
 predict.py. Kept dumb and pure — easy to call from anywhere, easy to mock.
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timezone

@@ -15,6 +15,7 @@ RLS-aware request scoping:
   treat as 'no tenant scope' (used for audit_log reads, the migration
   script, and chain verify).
 """
+
 from __future__ import annotations
 
 import logging
@@ -78,8 +79,7 @@ async def with_user(user_id: str):
     async with pool().acquire() as conn:
         async with conn.transaction():
             await conn.execute(f"SET LOCAL ROLE {_APP_ROLE}")
-            await conn.execute("SELECT set_config('app.current_user_id', $1, true)",
-                               str(user_id))
+            await conn.execute("SELECT set_config('app.current_user_id', $1, true)", str(user_id))
             yield conn
 
 
