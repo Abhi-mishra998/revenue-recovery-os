@@ -27,6 +27,7 @@ from services.seed import seed_demo_for_owner
 from services.ai import generate_proposal_followup, NoApiKeyError, GuardrailViolation, MalformedOutputError
 from services.audit import append_audit, load_signing_key, verify_chain, get_public_key_fp
 from services.events import emit_event
+from services.memory import recompute_client_memory, get_or_compute_client_memory
 
 # ---------- MongoDB ----------
 mongo_url = os.environ['MONGO_URL']
@@ -454,7 +455,15 @@ async def delete_client(client_id: str, user: dict = Depends(get_current_user)):
     if res.deleted_count:
         await append_audit(db, action="client.delete", actor_id=user["id"], actor_email=user["email"],
                            resource_type="client", resource_id=client_id)
+        await db.client_memory.delete_many({"owner_id": user["id"], "client_id": client_id})
     return {"ok": True}
+
+
+@api.get("/clients/{client_id}/memory")
+async def get_client_memory(client_id: str, user: dict = Depends(get_current_user)):
+    """Per-client derived features. Cached doc; rebuilt on read if missing."""
+    await assert_owns_client(client_id, user)
+    return await get_or_compute_client_memory(db, owner_id=user["id"], client_id=client_id)
 
 
 # ---------- Proposals ----------
@@ -539,6 +548,7 @@ async def update_proposal(proposal_id: str, payload: ProposalUpdate, user: dict 
                              metadata={"value_inr": prior.get("value_inr"),
                                        "days_to_close": days_to_close,
                                        "client_id": prior.get("client_id")})
+            await recompute_client_memory(db, owner_id=user["id"], client_id=prior["client_id"])
     return serialize_proposal(p)
 
 
@@ -610,6 +620,7 @@ async def update_invoice(invoice_id: str, payload: InvoiceUpdate, user: dict = D
                          metadata={"amount_inr": prior.get("amount_inr"),
                                    "days_overdue_at_payment": days_overdue_at_payment,
                                    "client_id": prior.get("client_id")})
+        await recompute_client_memory(db, owner_id=user["id"], client_id=prior["client_id"])
     return serialize_invoice(inv)
 
 
@@ -659,6 +670,7 @@ async def create_activity(payload: ActivityCreate, user: dict = Depends(get_curr
     doc.pop("_id", None)
     await append_audit(db, action="activity.create", actor_id=user["id"], actor_email=user["email"],
                        resource_type="activity", resource_id=doc["id"], payload=payload.model_dump())
+    await recompute_client_memory(db, owner_id=user["id"], client_id=doc["client_id"])
     return doc
 
 
@@ -1003,6 +1015,7 @@ async def on_startup():
     await db.audit_log.create_index([("action", 1), ("timestamp", -1)])
     await db.events.create_index([("owner_id", 1), ("entity_id", 1), ("created_at", -1)])
     await db.events.create_index([("owner_id", 1), ("event_type", 1), ("created_at", -1)])
+    await db.client_memory.create_index([("owner_id", 1), ("client_id", 1)], unique=True)
     await db.settings.create_index("id", unique=True)
     await migrate_legacy_fields()
     await load_signing_key(db)
