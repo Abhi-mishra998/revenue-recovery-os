@@ -237,3 +237,56 @@ Global singleton (`id="global"`):
 The shapes above are **v2** of the schema (the legacy v1 rename migration lives
 in `migrate_legacy_fields`). Future breaking changes get a new migration
 function and a bump to v3 — additive fields don't require a version bump.
+
+---
+
+## SQL DDL appendix (Postgres engine)
+
+Full schema lives at `backend/db/sql/0001_initial.sql`. The mapping below is
+the contract: every Mongo collection above has a 1:1 Postgres table with the
+same field names. Both engines coexist behind the `DB_ENGINE` env knob;
+see `docs/runbook-pg-cutover.md` for cutover/rollback.
+
+| Mongo collection  | Postgres table   | FK targets                                    | RLS  | Notes |
+| ----------------- | ---------------- | --------------------------------------------- | ---- | ----- |
+| `users`           | `users`          | —                                             | no   | auth runs before tenant scope is known |
+| `clients`         | `clients`        | `owner_id → users(id) ON DELETE CASCADE`      | yes  | |
+| `proposals`       | `proposals`      | `owner_id`, `client_id` (both cascade)        | yes  | `outcome_at` stamped on stage→won/lost |
+| `invoices`        | `invoices`       | `owner_id`, `client_id` (both cascade)        | yes  | |
+| `activities`      | `activities`     | `owner_id`, `client_id` (both cascade)        | yes  | |
+| `followups`       | `followups`      | `owner_id`, `proposal_id`, `client_id`        | yes  | `context` jsonb · `embedding vector(1536)` for future semantic search |
+| `events`          | `events`         | `owner_id`                                    | yes  | `prior_value`/`new_value`/`metadata` all jsonb |
+| `client_memory`   | `client_memory`  | `owner_id`, `client_id` · unique `(owner,client)` | yes | `channel_counts`/`last_outcomes` jsonb |
+| `audit_log`       | `audit_log`      | — (text actor_id allows 'system')             | no   | admin-only at app layer; `seq` UNIQUE; chain stays signed |
+| `settings`        | `settings`       | —                                             | no   | singleton id='global' |
+
+### RLS — the critical bit
+
+Every tenant-scoped table:
+```sql
+ALTER TABLE <t> ENABLE ROW LEVEL SECURITY;
+ALTER TABLE <t> FORCE  ROW LEVEL SECURITY;   -- without this, the table owner bypasses RLS
+CREATE POLICY <t>_owner ON <t>
+  USING      (owner_id = current_setting('app.current_user_id', true)::uuid)
+  WITH CHECK (owner_id = current_setting('app.current_user_id', true)::uuid);
+```
+
+The connecting role (`POSTGRES_USER`, default `revora`) is a superuser and
+superusers bypass RLS unconditionally. The DAO at `services/db/pg.py:with_user()`
+therefore opens each request transaction with:
+
+```sql
+SET LOCAL ROLE revora_app;                                  -- drop to non-superuser
+SELECT set_config('app.current_user_id', '<uuid>', true);   -- pin tenant
+```
+
+The `revora_app` role is created by `0001_initial.sql` with `SELECT/INSERT/UPDATE/DELETE`
+on every public table. Admin paths (`audit_log` reads, the migration script,
+chain verify) skip the role drop and run as superuser — those don't need
+tenant scoping and would otherwise hit RLS for cross-tenant work.
+
+### Indexes
+
+Owner-first composite indexes match every read path. The pgvector HNSW index
+on `followups.embedding` is intentionally deferred — empty index on an empty
+column is wasted maintenance cost; build it once writes start landing.
