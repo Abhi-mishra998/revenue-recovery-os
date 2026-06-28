@@ -28,6 +28,7 @@ from services.ai import generate_proposal_followup, NoApiKeyError, GuardrailViol
 from services.audit import append_audit, load_signing_key, verify_chain, get_public_key_fp
 from services.events import emit_event
 from services.memory import recompute_client_memory, get_or_compute_client_memory
+from services.data import extract_proposal_features, predict_close_probability
 
 # ---------- MongoDB ----------
 mongo_url = os.environ['MONGO_URL']
@@ -500,8 +501,18 @@ async def get_proposal(proposal_id: str, user: dict = Depends(get_current_user))
     p = await db.proposals.find_one({"id": proposal_id, "owner_id": user["id"]}, {"_id": 0})
     if not p:
         raise HTTPException(404, "Proposal not found")
-    clients_map = {p["client_id"]: await db.clients.find_one({"id": p["client_id"], "owner_id": user["id"]}, {"_id": 0}) or {}}
-    return serialize_proposal(p, clients_map)
+    c = await db.clients.find_one({"id": p["client_id"], "owner_id": user["id"]}, {"_id": 0}) or {}
+    clients_map = {p["client_id"]: c}
+    out = serialize_proposal(p, clients_map)
+    # Live inference: features pulled from proposal + client memory,
+    # heuristic baseline today; trained model swaps behind same shape later.
+    memory = await db.client_memory.find_one(
+        {"owner_id": user["id"], "client_id": p["client_id"]}, {"_id": 0},
+    )
+    enriched_proposal = {**p, "client_industry": c.get("industry")}
+    features = extract_proposal_features(proposal=enriched_proposal, memory=memory)
+    out["prediction"] = predict_close_probability(features).to_dict()
+    return out
 
 
 @api.get("/proposals/{proposal_id}/followups")
