@@ -119,11 +119,13 @@ async def get_current_user(creds: Optional[HTTPAuthorizationCredentials] = Depen
 
 
 def public_user(u: dict) -> dict:
+    admin_email = (os.environ.get("ADMIN_EMAIL") or "").strip().lower()
     return {
         "id": u["id"],
         "email": u["email"],
         "name": u.get("name", ""),
         "auth_provider": u.get("auth_provider", "email"),
+        "is_admin": bool(admin_email) and u["email"].lower() == admin_email,
     }
 
 
@@ -796,6 +798,31 @@ async def set_killswitch(req: KillSwitchReq, admin: dict = Depends(require_admin
                        actor_id=admin["id"], actor_email=admin["email"],
                        payload={"enabled": req.enabled})
     return {"ai_killswitch": req.enabled}
+
+
+# ---------- Admin: AI configuration ----------
+@api.get("/admin/ai/config")
+async def admin_ai_config(admin: dict = Depends(require_admin)):
+    """Read-only view of the active prompts + routing table — powers the
+    admin dashboard's 'AI Config' card."""
+    from services.ai import prompts as _prompts
+    from services.ai.router import _DEFAULTS, route, RouteSignals, HIGH_VALUE_THRESHOLD_INR
+    active = {
+        task: {"ref": t.ref, "description": t.description}
+        for task, t in _prompts.ACTIVE.items()
+    }
+    versions = {t.ref: t.description for t in _prompts.ALL.values()}
+    sample_simple = route(RouteSignals(value_inr=100_000))
+    sample_complex = route(RouteSignals(value_inr=HIGH_VALUE_THRESHOLD_INR))
+    return {
+        "active_prompts": active,
+        "prompt_versions": versions,
+        "routes_default": {
+            "simple":  {"provider": sample_simple.provider, "model": sample_simple.model},
+            "complex": {"provider": sample_complex.provider, "model": sample_complex.model},
+        },
+        "high_value_threshold_inr": HIGH_VALUE_THRESHOLD_INR,
+    }
 
 
 # ---------- Admin: audit log ----------
