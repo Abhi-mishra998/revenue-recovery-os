@@ -188,31 +188,50 @@ class TestInvoices:
             assert k in inv
         assert inv["status"] in ("paid", "unpaid", "overdue")
 
-    def test_overdue_and_mark_paid(self, client):
-        cid = client.get(f"{API}/clients", timeout=15).json()[0]["id"]
-        r = client.post(f"{API}/invoices", json={
-            "client_id": cid,
-            "invoice_no": f"TEST-{uuid.uuid4().hex[:5]}",
-            "amount_inr": 50000,
-            "due_date": _iso_ago(10),
+    def _own_client(self, client) -> str:
+        """Create a fresh client owned by the test session — avoids racing
+        with TestClients on the alphabetically-first existing client."""
+        r = client.post(f"{API}/clients", json={
+            "company_name": f"INV_TEST_{uuid.uuid4().hex[:6]}",
+            "contact_name": "Inv Tester",
         }, timeout=15)
-        inv = r.json()
-        assert inv["status"] == "overdue"
-        assert inv["days_overdue"] == 10
-        u = client.patch(f"{API}/invoices/{inv['id']}", json={"paid_date": _iso_ago(1)}, timeout=15)
-        assert u.json()["status"] == "paid"
-        assert u.json()["days_overdue"] == 0
-        client.delete(f"{API}/invoices/{inv['id']}", timeout=15)
+        assert r.status_code == 200, r.text
+        return r.json()["id"]
+
+    def test_overdue_and_mark_paid(self, client):
+        cid = self._own_client(client)
+        try:
+            r = client.post(f"{API}/invoices", json={
+                "client_id": cid,
+                "invoice_no": f"TEST-{uuid.uuid4().hex[:5]}",
+                "amount_inr": 50000,
+                "due_date": _iso_ago(10),
+            }, timeout=15)
+            assert r.status_code == 200, r.text
+            inv = r.json()
+            assert inv["status"] == "overdue"
+            assert inv["days_overdue"] == 10
+            u = client.patch(f"{API}/invoices/{inv['id']}", json={"paid_date": _iso_ago(1)}, timeout=15)
+            assert u.status_code == 200, u.text
+            assert u.json()["status"] == "paid"
+            assert u.json()["days_overdue"] == 0
+            client.delete(f"{API}/invoices/{inv['id']}", timeout=15)
+        finally:
+            client.delete(f"{API}/clients/{cid}", timeout=15)
 
     def test_unpaid_future(self, client):
-        cid = client.get(f"{API}/clients", timeout=15).json()[0]["id"]
-        r = client.post(f"{API}/invoices", json={
-            "client_id": cid,
-            "invoice_no": f"TEST-{uuid.uuid4().hex[:5]}",
-            "amount_inr": 10000,
-            "due_date": _iso_ahead(5),
-        }, timeout=15)
-        inv = r.json()
-        assert inv["status"] == "unpaid"
-        assert inv["days_overdue"] == 0
-        client.delete(f"{API}/invoices/{inv['id']}", timeout=15)
+        cid = self._own_client(client)
+        try:
+            r = client.post(f"{API}/invoices", json={
+                "client_id": cid,
+                "invoice_no": f"TEST-{uuid.uuid4().hex[:5]}",
+                "amount_inr": 10000,
+                "due_date": _iso_ahead(5),
+            }, timeout=15)
+            assert r.status_code == 200, r.text
+            inv = r.json()
+            assert inv["status"] == "unpaid"
+            assert inv["days_overdue"] == 0
+            client.delete(f"{API}/invoices/{inv['id']}", timeout=15)
+        finally:
+            client.delete(f"{API}/clients/{cid}", timeout=15)
