@@ -15,11 +15,11 @@ export default function Dashboard() {
   const splitTotal = (summary?.active_inr || 0) + (summary?.cold_inr || 0) + (summary?.dead_inr || 0);
 
   return (
-    <div className="p-5 md:p-8 max-w-[1300px]" data-testid="dashboard-page">
+    <div className="p-6 md:p-10 max-w-[1300px] mx-auto" data-testid="dashboard-page">
       <header>
-        <div className="text-[11px] uppercase tracking-[0.22em] text-slate-500 font-semibold">Operator console</div>
-        <h1 className="text-3xl md:text-4xl font-semibold mt-1.5 text-slate-900">Dashboard</h1>
-        <p className="text-sm text-slate-500 mt-1.5">A live snapshot of your revenue health.</p>
+        <div className="text-[11px] uppercase tracking-[0.08em] text-zinc-500 font-medium">Overview</div>
+        <h1 className="text-[28px] md:text-[32px] font-semibold mt-1 text-zinc-900 tracking-tight">Dashboard</h1>
+        <p className="text-[13.5px] text-zinc-500 mt-1.5">A live snapshot of your revenue health.</p>
       </header>
 
       {/* Hero metrics */}
@@ -60,41 +60,45 @@ export default function Dashboard() {
       </section>
 
       {/* Pipeline split by auto status */}
-      <section className="grid grid-cols-1 sm:grid-cols-3 gap-4 md:gap-5 mt-5" data-testid="dashboard-splits">
-        <SplitCard label="Active" value={summary?.active_inr} count={summary?.by_status?.active} status="active" icon={Activity} testId="card-active" />
-        <SplitCard label="Cold" value={summary?.cold_inr} count={summary?.by_status?.cold} status="cold" icon={Snowflake} testId="card-cold" />
-        <SplitCard label="Dead" value={summary?.dead_inr} count={summary?.by_status?.dead} status="dead" icon={Skull} testId="card-dead" />
+      <section className="grid grid-cols-1 sm:grid-cols-3 gap-3 md:gap-4 mt-4" data-testid="dashboard-splits">
+        <SplitCard label="Active" value={summary?.active_inr} count={summary?.by_status?.active} status="active" testId="card-active" />
+        <SplitCard label="Cold" value={summary?.cold_inr} count={summary?.by_status?.cold} status="cold" testId="card-cold" />
+        <SplitCard label="Dead" value={summary?.dead_inr} count={summary?.by_status?.dead} status="dead" testId="card-dead" />
       </section>
 
       {/* Donut + Top 5 list */}
-      <section className="grid grid-cols-1 lg:grid-cols-5 gap-5 mt-6">
-        <div className="revora-card p-5 md:p-6 lg:col-span-2" data-testid="dashboard-donut">
-          <div className="revora-stat-label">Pipeline by status</div>
-          <p className="text-xs text-slate-500 mt-1">By ₹ value · stage = sent / negotiating</p>
+      <section className="grid grid-cols-1 lg:grid-cols-5 gap-4 mt-4">
+        <div className="revora-card p-5 lg:col-span-2" data-testid="dashboard-donut">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="revora-stat-label">Pipeline by status</div>
+              <p className="text-[12px] text-zinc-500 mt-1">By ₹ value · open proposals only</p>
+            </div>
+          </div>
           <Donut
             total={splitTotal}
             slices={[
-              { key: "active", label: "Active", value: summary?.active_inr || 0, color: "#16A34A" },
+              { key: "active", label: "Active", value: summary?.active_inr || 0, color: "#059669" },
               { key: "cold",   label: "Cold",   value: summary?.cold_inr || 0,   color: "#D97706" },
-              { key: "dead",   label: "Dead",   value: summary?.dead_inr || 0,   color: "#DC2626" },
+              { key: "dead",   label: "Dead",   value: summary?.dead_inr || 0,   color: "#E11D48" },
             ]}
           />
         </div>
 
-        <div className="revora-card p-5 md:p-6 lg:col-span-3" data-testid="dashboard-top-risk">
+        <div className="revora-card p-5 lg:col-span-3" data-testid="dashboard-top-risk">
           <div className="flex items-center justify-between gap-3">
             <div>
               <div className="revora-stat-label">Top 5 proposals at risk</div>
-              <p className="text-xs text-slate-500 mt-1">Ranked by value × days silent. Click to open.</p>
+              <p className="text-[12px] text-zinc-500 mt-1">Ranked by value × days silent</p>
             </div>
-            <Link to="/proposals" className="text-xs text-indigo-700 hover:text-indigo-800 inline-flex items-center gap-1" data-testid="top-risk-see-all">
+            <Link to="/proposals" className="text-[12px] text-zinc-900 hover:text-zinc-700 inline-flex items-center gap-1 underline-offset-4 hover:underline" data-testid="top-risk-see-all">
               See all <ArrowUpRight className="w-3 h-3" />
             </Link>
           </div>
 
-          <div className="mt-4 divide-y divide-slate-100">
+          <div className="mt-3 divide-y" style={{ borderColor: "var(--border-soft)" }}>
             {(summary?.top_at_risk || []).length === 0 && (
-              <div className="text-sm text-slate-400 py-6 text-center" data-testid="top-risk-empty">
+              <div className="text-sm text-zinc-400 py-6 text-center" data-testid="top-risk-empty">
                 Nothing at risk. You&apos;re caught up.
               </div>
             )}
@@ -102,23 +106,24 @@ export default function Dashboard() {
               <Link
                 key={p.id}
                 to={`/proposals/${p.id}`}
-                className="flex items-center gap-3 py-3 hover:bg-indigo-50/40 rounded-md px-2 -mx-2 transition group"
+                className="flex items-center gap-3 py-3 hover:bg-zinc-50 rounded-md px-2 -mx-2 transition group"
                 data-testid={`top-risk-row-${p.id}`}
               >
-                <span className="w-6 h-6 shrink-0 rounded-md bg-slate-100 text-slate-500 text-xs grid place-items-center font-mono-num group-hover:bg-indigo-100 group-hover:text-indigo-700">
+                <span className="w-6 h-6 shrink-0 rounded-md grid place-items-center font-mono-num text-[11px]"
+                  style={{ background: "var(--surface-2)", color: "var(--text-soft)", border: "1px solid var(--border)" }}>
                   {idx + 1}
                 </span>
                 <div className="min-w-0 flex-1">
-                  <div className="text-sm font-medium text-slate-900 truncate">{p.title}</div>
-                  <div className="text-xs text-slate-500 truncate">
-                    {p.client_company_name} <span className="text-slate-300">·</span> {p.client_contact_name}
+                  <div className="text-[13.5px] font-medium text-zinc-900 truncate">{p.title}</div>
+                  <div className="text-[12px] text-zinc-500 truncate">
+                    {p.client_company_name} <span className="text-zinc-300">·</span> {p.client_contact_name}
                   </div>
                 </div>
-                <div className="hidden sm:flex items-center gap-3 text-xs text-slate-500 shrink-0">
+                <div className="hidden sm:flex items-center gap-3 text-[12px] text-zinc-500 shrink-0">
                   <span className="tnum">{p.days_silent}d silent</span>
                   <StatusBadge status={p.status} />
                 </div>
-                <div className="font-mono-num tnum text-sm text-slate-900 shrink-0" data-testid={`top-risk-value-${p.id}`}>
+                <div className="font-mono-num tnum text-[13px] text-zinc-900 shrink-0" data-testid={`top-risk-value-${p.id}`}>
                   {inr(p.value_inr)}
                 </div>
               </Link>
@@ -131,26 +136,20 @@ export default function Dashboard() {
 }
 
 function Card({ label, value, sub, icon: Icon, tint, testId, accent }) {
-  const tints = {
-    indigo: "bg-indigo-50 text-indigo-700 border-indigo-100",
-    amber:  "bg-amber-50 text-amber-700 border-amber-100",
-    red:    "bg-red-50 text-red-700 border-red-100",
-    teal:   "bg-teal-50 text-teal-700 border-teal-100",
-  };
   return (
-    <div className="revora-card p-5 md:p-6" data-testid={testId}>
+    <div className="revora-card p-5 lift-on-hover" data-testid={testId}>
       <div className="flex items-start justify-between">
         <div className="revora-stat-label">{label}</div>
         {Icon && (
-          <span className={`w-8 h-8 rounded-md border grid place-items-center ${tints[tint]}`}>
-            <Icon className="w-4 h-4" />
+          <span className="w-7 h-7 rounded-md grid place-items-center text-zinc-500" style={{ background: "var(--surface-2)", border: "1px solid var(--border)" }}>
+            <Icon className="w-3.5 h-3.5" strokeWidth={1.75} />
           </span>
         )}
       </div>
-      <div className="mt-4 text-3xl md:text-4xl font-semibold text-slate-900 tnum" data-testid={`${testId}-value`}>
+      <div className="mt-3 text-[28px] md:text-[30px] font-semibold text-zinc-900 tracking-tight tnum" data-testid={`${testId}-value`}>
         {value}
       </div>
-      <div className={`mt-1 text-xs ${accent === "assumption" ? "text-teal-700" : "text-slate-500"}`} data-testid={`${testId}-sub`}>
+      <div className={`mt-1.5 text-[12px] ${accent === "assumption" ? "text-zinc-600 italic" : "text-zinc-500"}`} data-testid={`${testId}-sub`}>
         {sub}
       </div>
     </div>
@@ -159,18 +158,15 @@ function Card({ label, value, sub, icon: Icon, tint, testId, accent }) {
 
 function SplitCard({ label, value, count, status, icon: Icon, testId }) {
   return (
-    <div className="revora-card p-5" data-testid={testId}>
+    <div className="revora-card p-5 lift-on-hover" data-testid={testId}>
       <div className="flex items-center justify-between">
         <div className="revora-stat-label">{label}</div>
-        <div className="flex items-center gap-2">
-          {Icon && <Icon className="w-3.5 h-3.5 text-slate-400" />}
-          <StatusBadge status={status} />
-        </div>
+        <StatusBadge status={status} />
       </div>
-      <div className="mt-2 text-2xl font-semibold text-slate-900 tnum" data-testid={`${testId}-value`}>
+      <div className="mt-3 text-[22px] font-semibold text-zinc-900 tracking-tight tnum" data-testid={`${testId}-value`}>
         {inr(value)}
       </div>
-      <div className="text-xs text-slate-500 mt-1">{count ?? 0} {count === 1 ? "proposal" : "proposals"}</div>
+      <div className="text-[12px] text-zinc-500 mt-1">{count ?? 0} {count === 1 ? "proposal" : "proposals"}</div>
     </div>
   );
 }

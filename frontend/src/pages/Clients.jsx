@@ -25,12 +25,12 @@ export default function Clients() {
   };
 
   return (
-    <div className="p-5 md:p-8 max-w-[1300px]" data-testid="clients-page">
+    <div className="p-6 md:p-10 max-w-[1300px] mx-auto" data-testid="clients-page">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <div className="text-[11px] uppercase tracking-[0.22em] text-slate-500 font-semibold">Roster</div>
-          <h1 className="text-3xl md:text-4xl font-semibold mt-1.5 text-slate-900">Clients</h1>
-          <p className="text-sm text-slate-500 mt-1.5">All your clients and contacts.</p>
+          <div className="text-[11px] uppercase tracking-[0.08em] text-zinc-500 font-medium">Roster</div>
+          <h1 className="text-[28px] md:text-[32px] font-semibold mt-1 text-zinc-900 tracking-tight">Clients</h1>
+          <p className="text-[13.5px] text-zinc-500 mt-1.5">All your clients and contacts.</p>
         </div>
         <button className="cta-primary" onClick={() => setEditing({ __new: true })} data-testid="new-client-btn">
           <Plus className="w-4 h-4" /> New client

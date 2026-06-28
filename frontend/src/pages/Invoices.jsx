@@ -28,12 +28,12 @@ export default function Invoices() {
   };
 
   return (
-    <div className="p-5 md:p-8 max-w-[1400px]" data-testid="invoices-page">
+    <div className="p-6 md:p-10 max-w-[1400px] mx-auto" data-testid="invoices-page">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <div className="text-[11px] uppercase tracking-[0.22em] text-slate-500 font-semibold">Receivables</div>
-          <h1 className="text-3xl md:text-4xl font-semibold mt-1.5 text-slate-900">Invoices</h1>
-          <p className="text-sm text-slate-500 mt-1.5">All invoices with auto status: paid / unpaid / overdue.</p>
+          <div className="text-[11px] uppercase tracking-[0.08em] text-zinc-500 font-medium">Receivables</div>
+          <h1 className="text-[28px] md:text-[32px] font-semibold mt-1 text-zinc-900 tracking-tight">Invoices</h1>
+          <p className="text-[13.5px] text-zinc-500 mt-1.5">Auto status: paid · unpaid · overdue.</p>
         </div>
         <div className="flex items-center gap-2">
           <button className="cta-ghost" onClick={() => setBulkOpen(true)} data-testid="bulk-add-invoices-btn">

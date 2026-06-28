@@ -30,16 +30,16 @@ export default function ClientDetail() {
   const { client, proposals, invoices } = data;
 
   return (
-    <div className="p-5 md:p-8 max-w-[1100px]" data-testid={`client-detail-${id}`}>
-      <Link to="/clients" className="inline-flex items-center text-xs text-slate-500 hover:text-slate-800 gap-1 mb-4" data-testid="back-to-clients">
+    <div className="p-6 md:p-10 max-w-[1100px] mx-auto" data-testid={`client-detail-${id}`}>
+      <Link to="/clients" className="inline-flex items-center text-[12px] text-zinc-500 hover:text-zinc-800 gap-1 mb-4" data-testid="back-to-clients">
         <ArrowLeft className="w-3.5 h-3.5" /> All clients
       </Link>
 
       <div className="revora-card p-6">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h1 className="text-2xl md:text-3xl font-semibold text-slate-900">{client.company_name}</h1>
-            <div className="text-slate-500 mt-1">{client.contact_name}</div>
+            <h1 className="text-[22px] md:text-[26px] font-semibold text-zinc-900 tracking-tight">{client.company_name}</h1>
+            <div className="text-zinc-500 mt-0.5 text-[13.5px]">{client.contact_name}</div>
           </div>
           <div className="flex items-center gap-2">
             <button onClick={() => setEditing(true)} className="cta-ghost" data-testid="edit-client-detail"><Pencil className="w-3.5 h-3.5" /> Edit</button>

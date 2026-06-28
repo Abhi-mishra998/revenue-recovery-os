@@ -1,81 +1,98 @@
-@import url("https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap");
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 :root {
-  --bg: #F8FAFC;
+  /* Surfaces */
+  --bg: #FAFAFA;
   --surface: #FFFFFF;
-  --text: #0F172A;
-  --text-muted: #475569;
-  --text-soft: #64748B;
+  --surface-2: #F7F7F8;
 
-  --primary: #4338CA;       /* indigo-700 */
-  --primary-hover: #3730A3; /* indigo-800 */
-  --primary-soft: #EEF2FF;  /* indigo-50 */
+  /* Text */
+  --text: #09090B;
+  --text-muted: #52525B;
+  --text-soft: #71717A;
+  --text-faint: #A1A1AA;
 
-  --accent: #0D9488;        /* teal-600 */
-  --accent-hover: #0F766E;  /* teal-700 */
-  --accent-soft: #F0FDFA;   /* teal-50 */
+  /* Lines */
+  --border: #E4E4E7;
+  --border-strong: #D4D4D8;
+  --border-soft: #F4F4F5;
 
-  --border: #E2E8F0;
-  --border-soft: #F1F5F9;
+  /* Primary = near-black (Vercel/Linear trust signal) */
+  --primary: #09090B;
+  --primary-hover: #18181B;
+  --primary-soft: #F4F4F5;
 
-  --green-bg: #DCFCE7;
-  --green-text: #166534;
-  --green-border: #86EFAC;
+  /* Accent — only for links + focus ring (Linear-ish indigo) */
+  --accent: #5B5BD6;
+  --accent-hover: #4F46E5;
+  --accent-soft: #EEF2FF;
 
-  --amber-bg: #FEF3C7;
-  --amber-text: #92400E;
+  /* Status — restrained, dot-led */
+  --green:        #059669;
+  --green-bg:     #ECFDF5;
+  --green-border: #A7F3D0;
+
+  --amber:        #D97706;
+  --amber-bg:     #FFFBEB;
   --amber-border: #FCD34D;
 
-  --red-bg: #FEE2E2;
-  --red-text: #991B1B;
-  --red-border: #FCA5A5;
+  --rose:         #E11D48;
+  --rose-bg:      #FFF1F2;
+  --rose-border:  #FECDD3;
 
-  --slate-bg: #F1F5F9;
-  --slate-text: #475569;
-  --slate-border: #CBD5E1;
+  --slate:        #52525B;
+  --slate-bg:     #F4F4F5;
+  --slate-border: #D4D4D8;
+
+  /* Shadows */
+  --shadow-xs: 0 1px 0 rgba(9, 9, 11, 0.04);
+  --shadow-sm: 0 1px 2px rgba(9, 9, 11, 0.04), 0 1px 1px rgba(9, 9, 11, 0.03);
+  --shadow-md: 0 4px 14px rgba(9, 9, 11, 0.06);
+  --shadow-pop: 0 16px 40px rgba(9, 9, 11, 0.12);
 }
 
 html, body, #root {
   background: var(--bg);
   color: var(--text);
-  font-family: "Outfit", "Helvetica Neue", system-ui, sans-serif;
+  font-family: "Geist", "Helvetica Neue", system-ui, sans-serif;
+  font-feature-settings: "ss01" on, "cv11" on;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  letter-spacing: -0.005em;
 }
 
-.font-mono-num {
-  font-family: "JetBrains Mono", monospace;
-  font-feature-settings: "tnum" on;
-  letter-spacing: -0.02em;
+.font-mono-num,
+.tnum {
+  font-family: "Geist Mono", ui-monospace, monospace;
+  font-feature-settings: "tnum" on, "zero" on;
+  letter-spacing: -0.01em;
 }
-
-.tnum { font-variant-numeric: tabular-nums; }
 
 @layer base {
   :root {
-    --background: 210 40% 98%;
-    --foreground: 222 47% 11%;
+    --background: 0 0% 98%;
+    --foreground: 240 6% 10%;
     --card: 0 0% 100%;
-    --card-foreground: 222 47% 11%;
+    --card-foreground: 240 6% 10%;
     --popover: 0 0% 100%;
-    --popover-foreground: 222 47% 11%;
-    --primary: 244 75% 51%;
+    --popover-foreground: 240 6% 10%;
+    --primary: 240 6% 10%;
     --primary-foreground: 0 0% 100%;
-    --secondary: 210 40% 96%;
-    --secondary-foreground: 222 47% 11%;
-    --muted: 210 40% 96%;
-    --muted-foreground: 215 16% 47%;
-    --accent: 173 80% 32%;
-    --accent-foreground: 0 0% 100%;
-    --destructive: 0 84% 60%;
+    --secondary: 240 5% 96%;
+    --secondary-foreground: 240 6% 10%;
+    --muted: 240 5% 96%;
+    --muted-foreground: 240 4% 46%;
+    --accent: 240 5% 96%;
+    --accent-foreground: 240 6% 10%;
+    --destructive: 350 89% 50%;
     --destructive-foreground: 0 0% 100%;
-    --border: 214 32% 91%;
-    --input: 214 32% 91%;
-    --ring: 244 75% 51%;
+    --border: 240 6% 90%;
+    --input: 240 6% 90%;
+    --ring: 244 75% 60%;
     --radius: 0.5rem;
   }
 }
@@ -85,9 +102,13 @@ html, body, #root {
   body { @apply bg-background text-foreground; }
 }
 
-::selection { background: #C7D2FE; color: #1E1B4B; }
+::selection { background: #DDD6FE; color: #1E1B4B; }
 ::-webkit-scrollbar { width: 10px; height: 10px; }
-::-webkit-scrollbar-thumb { background: #CBD5E1; border-radius: 8px; }
-::-webkit-scrollbar-thumb:hover { background: #94A3B8; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #E4E4E7; border-radius: 999px; border: 2px solid var(--bg); }
+::-webkit-scrollbar-thumb:hover { background: #A1A1AA; }
 
 [data-debug-wrapper="true"] { display: contents !important; }
+
+a { color: inherit; }
+button { font-family: inherit; }

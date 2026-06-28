@@ -57,8 +57,8 @@ export default function ProposalDetail() {
   if (!data) return <div className="p-8 text-slate-500">Loading…</div>;
 
   return (
-    <div className="p-5 md:p-8 max-w-[1000px]" data-testid={`proposal-detail-${id}`}>
-      <Link to="/proposals" className="inline-flex items-center text-xs text-slate-500 hover:text-slate-800 gap-1 mb-4" data-testid="back-to-proposals">
+    <div className="p-6 md:p-10 max-w-[1000px] mx-auto" data-testid={`proposal-detail-${id}`}>
+      <Link to="/proposals" className="inline-flex items-center text-[12px] text-zinc-500 hover:text-zinc-800 gap-1 mb-4" data-testid="back-to-proposals">
         <ArrowLeft className="w-3.5 h-3.5" /> All proposals
       </Link>
 
@@ -66,9 +66,9 @@ export default function ProposalDetail() {
       <div className="revora-card p-6">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h1 className="text-2xl md:text-3xl font-semibold text-slate-900">{data.title}</h1>
+            <h1 className="text-[22px] md:text-[26px] font-semibold text-zinc-900 tracking-tight">{data.title}</h1>
             {client && (
-              <Link to={`/clients/${client.id}`} className="text-sm text-indigo-700 hover:text-indigo-800 mt-1 inline-block">
+              <Link to={`/clients/${client.id}`} className="text-[13px] text-zinc-700 hover:text-zinc-900 mt-1 inline-block underline-offset-4 hover:underline">
                 {client.company_name} · {client.contact_name}
               </Link>
             )}

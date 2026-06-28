@@ -1,13 +1,13 @@
 export function StatusBadge({ status, testId }) {
   const s = (status || "").toLowerCase();
   const dotColor = {
-    active: "#16A34A",
-    cold: "#D97706",
-    dead: "#DC2626",
-    paid: "#16A34A",
-    unpaid: "#64748B",
-    overdue: "#DC2626",
-  }[s] || "#64748B";
+    active:  "#059669",
+    cold:    "#D97706",
+    dead:    "#E11D48",
+    paid:    "#059669",
+    unpaid:  "#71717A",
+    overdue: "#E11D48",
+  }[s] || "#71717A";
   return (
     <span className={`badge badge-${s}`} data-testid={testId}>
       <span className="dot" style={{ background: dotColor }} />
