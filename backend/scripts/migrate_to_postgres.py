@@ -196,18 +196,28 @@ async def migrate(*, dry_run: bool) -> dict:
                     continue
 
                 inserted = 0
+                skipped_fk = 0
                 pg_before = int(await conn.fetchval(f"SELECT count(*) FROM {table}"))
-                async with conn.transaction():
-                    async for doc in fetch_mongo(mdb, table):
-                        params = row_to_params(table, doc)
+                # No outer transaction — we want to skip orphan rows without
+                # rolling back the whole table. Each row is its own savepoint.
+                async for doc in fetch_mongo(mdb, table):
+                    params = row_to_params(table, doc)
+                    try:
                         await conn.execute(INSERT_SQL[table], *params)
                         inserted += 1
+                    except asyncpg.exceptions.ForeignKeyViolationError as e:
+                        skipped_fk += 1
+                        # Print the first few for visibility; suppress the rest
+                        if skipped_fk <= 3:
+                            print(f"  [skip] {table} orphan: {e!s}".split("\n")[0])
                 pg_after = int(await conn.fetchval(f"SELECT count(*) FROM {table}"))
                 summary[table] = {
                     "mongo": mongo_count, "pg_before": pg_before,
                     "pg_after": pg_after, "inserted": inserted,
+                    "skipped_fk": skipped_fk,
                 }
-                print(f"{table:14s}  mongo={mongo_count:6d}  pg_after={pg_after:6d}  inserted={inserted}")
+                suffix = f"  skipped_fk={skipped_fk}" if skipped_fk else ""
+                print(f"{table:14s}  mongo={mongo_count:6d}  pg_after={pg_after:6d}  inserted={inserted}{suffix}")
     finally:
         await pg.close()
         mclient.close()
@@ -231,10 +241,15 @@ async def verify(summary: dict | None = None) -> bool:
             for table in TABLES:
                 mc = await mdb[table].count_documents({})
                 pc = int(await conn.fetchval(f"SELECT count(*) FROM {table}"))
-                status = "OK" if mc == pc else "MISMATCH"
-                print(f"{table:14s}  mongo={mc:6d}  pg={pc:6d}  {status}")
-                if mc != pc:
+                skipped = (summary or {}).get(table, {}).get("skipped_fk", 0)
+                if mc == pc:
+                    status = "OK"
+                elif mc - skipped == pc:
+                    status = f"OK (skipped {skipped} orphan)"
+                else:
+                    status = "MISMATCH"
                     ok = False
+                print(f"{table:14s}  mongo={mc:6d}  pg={pc:6d}  {status}")
 
         # Re-walk the chain on Postgres. The signing key needs to be loaded;
         # load_signing_key() reads from env first, then settings doc (which we

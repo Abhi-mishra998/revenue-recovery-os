@@ -25,7 +25,15 @@ import pytest
 POSTGRES_URL = os.environ.get("POSTGRES_URL")
 MONGO_URL = os.environ.get("MONGO_URL", "mongodb://localhost:27017")
 
-pytestmark = pytest.mark.skipif(not POSTGRES_URL, reason="POSTGRES_URL not set")
+# Hostile-to-live: this test TRUNCATEs every public table in its teardown.
+# Skip when the live engine is postgres — would wipe the production DB.
+# CI runs with DB_ENGINE unset (defaults to mongo) so the test still fires.
+_LIVE_ENGINE = (os.environ.get("DB_ENGINE") or "mongo").lower()
+pytestmark = [
+    pytest.mark.skipif(not POSTGRES_URL, reason="POSTGRES_URL not set"),
+    pytest.mark.skipif(_LIVE_ENGINE == "postgres",
+                       reason="DB_ENGINE=postgres — migration test would wipe live data"),
+]
 
 ROOT = Path(__file__).resolve().parent.parent  # backend/
 SCHEMA_SQL = ROOT / "db" / "sql" / "0001_initial.sql"

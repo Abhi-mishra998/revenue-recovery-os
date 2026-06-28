@@ -1,8 +1,10 @@
 """
 Audit log + kill-switch tests.
 
-Requires MONGO_URL and DB_NAME in env so the tamper tests can poke records
-directly. Admin email = ADMIN_EMAIL (defaults to founder@bytehubble.com).
+Tamper tests reach into the audit_log storage directly to mutate a record,
+then expect the chain-verify endpoint to detect the tampering. Engine-aware
+storage helper handles both Mongo and Postgres so this works on either
+DB_ENGINE.
 """
 import os
 import uuid
@@ -16,6 +18,8 @@ ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL", "founder@bytehubble.com")
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "ByteHubble@2025")
 MONGO_URL = os.environ.get("MONGO_URL", "mongodb://localhost:27017")
 DB_NAME = os.environ.get("DB_NAME", "revora_test")
+POSTGRES_URL = os.environ.get("POSTGRES_URL")
+DB_ENGINE = (os.environ.get("DB_ENGINE") or "mongo").lower()
 
 
 def _login(email: str, password: str) -> str:
@@ -44,13 +48,79 @@ def admin_session():
     return _session(_login(ADMIN_EMAIL, ADMIN_PASSWORD))
 
 
+class _AuditStorage:
+    """Engine-aware test helper for poking audit_log records directly.
+    On Mongo, wraps the audit_log collection (so existing tests keep working).
+    On Postgres, wraps a synchronous psycopg-free helper that uses asyncpg
+    inside asyncio.run."""
+
+    def __init__(self):
+        self._mongo_client = None
+        if DB_ENGINE == "mongo":
+            self._mongo_client = MongoClient(MONGO_URL)
+            self.audit_log = self._mongo_client[DB_NAME].audit_log
+        else:
+            import asyncio
+            import asyncpg
+
+            class _PgAudit:
+                """Subset of the motor Collection API we use in tests."""
+                def find_one(_self, filt=None, sort=None):  # noqa: N805
+                    filt = filt or {}
+                    async def _run():
+                        conn = await asyncpg.connect(POSTGRES_URL, timeout=5)
+                        try:
+                            params, where = [], []
+                            for k, v in filt.items():
+                                params.append(v)
+                                col = "resource_id" if k == "resource_id" else k
+                                where.append(f"{col} = ${len(params)}")
+                            sql = "SELECT * FROM audit_log"
+                            if where:
+                                sql += " WHERE " + " AND ".join(where)
+                            order = "seq DESC" if sort and sort[0][0] == "seq" and sort[0][1] == -1 else "seq ASC"
+                            sql += f" ORDER BY {order} LIMIT 1"
+                            row = await conn.fetchrow(sql, *params)
+                            if not row:
+                                return None
+                            d = dict(row)
+                            d["_id"] = str(d["id"])  # mongo-style key for compatibility
+                            return d
+                        finally:
+                            await conn.close()
+                    return asyncio.run(_run())
+
+                def update_one(_self, filt, update):
+                    set_clause = update.get("$set") or {}
+                    async def _run():
+                        conn = await asyncpg.connect(POSTGRES_URL, timeout=5)
+                        try:
+                            params, sets, where = [], [], []
+                            for k, v in set_clause.items():
+                                params.append(v); sets.append(f"{k} = ${len(params)}")
+                            for k, v in filt.items():
+                                col = "id::uuid" if k == "_id" else k
+                                params.append(str(v) if k == "_id" else v)
+                                where.append(f"id = ${len(params)}::uuid" if k == "_id" else f"{col} = ${len(params)}")
+                            sql = f"UPDATE audit_log SET {', '.join(sets)} WHERE {' AND '.join(where)}"
+                            await conn.execute(sql, *params)
+                        finally:
+                            await conn.close()
+                    asyncio.run(_run())
+            self.audit_log = _PgAudit()
+
+    def close(self):
+        if self._mongo_client:
+            self._mongo_client.close()
+
+
 @pytest.fixture(scope="module")
 def mongo_db():
-    c = MongoClient(MONGO_URL)
+    s = _AuditStorage()
     try:
-        yield c[DB_NAME]
+        yield s
     finally:
-        c.close()
+        s.close()
 
 
 class TestChainHappyPath:
