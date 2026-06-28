@@ -12,6 +12,7 @@ from typing import Optional
 
 from .client import NoApiKeyError, MalformedOutputError, generate_json, generate_text  # noqa: F401
 from .guardrail import GuardrailViolation, enforce_followup  # noqa: F401
+from .router import RouteSignals, Tier, route  # noqa: F401
 from . import prompts
 from . import redact as redact_mod
 from .schemas import FollowUpDraft
@@ -46,27 +47,37 @@ async def generate_proposal_followup(
     *, sender_name: str, recipient_contact: str, recipient_company: str,
     industry: Optional[str], title: str, value_inr: float, days_silent: int,
     provider: Optional[str] = None, model: Optional[str] = None,
-    prompt_ref: Optional[str] = None,
+    prompt_ref: Optional[str] = None, tier_override: Optional[Tier] = None,
 ) -> dict:
-    """Returns {whatsapp_text, email_subject, email_body, prompt_ref}.
+    """Returns {whatsapp_text, email_subject, email_body, prompt_ref, route_ref}.
 
     Single LLM call returns a JSON object matching FollowUpDraft. Malformed
     output triggers one corrective retry inside generate_json; second failure
     bubbles MalformedOutputError to the caller (server returns 502).
+
+    Model selection goes through the router: SIMPLE tier (Gemini Flash) by
+    default; COMPLEX tier (Claude Sonnet) for ≥ ₹50L proposals or when
+    tier_override is set. Caller can also pin a specific provider/model
+    bypassing the router.
     """
     template = prompts.get_ref(prompt_ref) if prompt_ref else prompts.get("proposal_followup")
+    choice = route(RouteSignals(
+        task="proposal_followup", value_inr=value_inr, override_tier=tier_override,
+    ))
+    eff_provider = provider or choice.provider
+    eff_model = model or choice.model
+
     context = _build_context(
         sender_name=sender_name, recipient_contact=recipient_contact,
         recipient_company=recipient_company, industry=industry,
         title=title, value_inr=value_inr, days_silent=days_silent,
     )
-    # PII redaction — emails/phones/PAN/GSTIN in title/notes never reach the LLM.
     redacted_context, token_map = redact_mod.redact(context)
     system, user = template.render(context=redacted_context)
 
     draft: FollowUpDraft = await generate_json(
         system=system, user=user, schema=template.schema,
-        provider=provider, model=model, session_id=f"fu-{uuid.uuid4()}",
+        provider=eff_provider, model=eff_model, session_id=f"fu-{uuid.uuid4()}",
     )
 
     # Rehydrate PII first, then guardrail-check the user-visible version.
@@ -82,6 +93,7 @@ async def generate_proposal_followup(
         "email_subject": rehydrated.email_subject,
         "email_body":    rehydrated.email_body,
         "prompt_ref": template.ref,
+        "route_ref": choice.ref,
     }
 
 
