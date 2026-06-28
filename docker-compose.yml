@@ -1,0 +1,37 @@
+# Dev stack for Revora. Bring the data layer up with:
+#   docker compose up -d
+#
+# Mongo stays for the rollback path (DB_ENGINE=mongo, the default while we
+# cut over). Postgres is the destination engine; pgvector ships in the
+# pgvector/pgvector:pg16 image, ready for followups.embedding.
+services:
+  mongo:
+    image: mongo:7
+    container_name: revora-mongo
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    restart: unless-stopped
+
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: revora-postgres
+    environment:
+      POSTGRES_USER: revora
+      POSTGRES_PASSWORD: revora
+      POSTGRES_DB: revora
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U revora -d revora"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  mongo_data:
+  pg_data:
