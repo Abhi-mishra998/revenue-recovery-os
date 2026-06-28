@@ -86,3 +86,8 @@ android-sdk/
 credentials.json
 *.key
 .credentials
+
+# pytest-cov data file
+.coverage
+coverage.xml
+junit.xml
