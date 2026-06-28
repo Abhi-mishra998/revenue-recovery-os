@@ -71,6 +71,38 @@ from services.memory import get_or_compute_client_memory, recompute_client_memor
 from services.obs import init_logging, init_sentry, request_id_ctx, user_id_ctx
 from services.seed import seed_demo_for_owner
 
+# ---------- Boot-time secret validation ----------
+# ENV=production tightens everything; anything else is dev/staging mode.
+# Fails fast at import so you can't accidentally ship with test secrets.
+ENV = (os.environ.get("ENV") or "development").lower()
+_IS_PROD = ENV == "production"
+
+
+def _validate_boot_secrets() -> None:
+    jwt_secret = os.environ.get("JWT_SECRET", "")
+    if not jwt_secret:
+        raise RuntimeError("JWT_SECRET is required.")
+    if _IS_PROD:
+        if len(jwt_secret) < 32:
+            raise RuntimeError(f"JWT_SECRET must be ≥32 chars in production (got {len(jwt_secret)}).")
+        if jwt_secret.startswith(("test-", "ci-", "dev-", "changeme")):
+            raise RuntimeError("JWT_SECRET looks like a placeholder. Set a real secret in production.")
+        cors = os.environ.get("CORS_ORIGINS", "")
+        if cors.strip() == "*" or not cors.strip():
+            raise RuntimeError("CORS_ORIGINS must be an explicit allowlist in production (no '*', no empty).")
+        if not os.environ.get("AUDIT_SIGNING_KEY"):
+            # Not fatal — auto-gen still works — but loud, because a process restart
+            # without env-pinned key + without persisted settings = chain break.
+            import logging as _l
+            _l.getLogger(__name__).warning(
+                "ENV=production but AUDIT_SIGNING_KEY not set. Audit chain depends on "
+                "the auto-generated key surviving in db.settings."
+            )
+
+
+_validate_boot_secrets()
+
+
 # ---------- MongoDB ----------
 mongo_url = os.environ["MONGO_URL"]
 client = AsyncIOMotorClient(mongo_url)
