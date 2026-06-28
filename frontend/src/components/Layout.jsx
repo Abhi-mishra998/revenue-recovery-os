@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
-import { LayoutDashboard, FileText, Receipt, Users, LogOut, Menu, X, Command, ShieldCheck } from "lucide-react";
+import { LayoutDashboard, FileText, Receipt, Users, LogOut, Menu, X, Command, ShieldCheck, Settings as SettingsIcon } from "lucide-react";
 
 export default function Layout() {
   const { user, logout } = useAuth();
@@ -83,6 +83,7 @@ function NavItems({ onClick }) {
       <SideLink to="/proposals" icon={FileText} label="Proposals" testId="nav-proposals" onClick={onClick} />
       <SideLink to="/clients" icon={Users} label="Clients" testId="nav-clients" onClick={onClick} />
       <SideLink to="/invoices" icon={Receipt} label="Invoices" testId="nav-invoices" onClick={onClick} />
+      <SideLink to="/settings" icon={SettingsIcon} label="Settings" testId="nav-settings" onClick={onClick} />
       {user?.is_admin && (
         <SideLink to="/admin" icon={ShieldCheck} label="Admin" testId="nav-admin" onClick={onClick} />
       )}

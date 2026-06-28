@@ -26,6 +26,18 @@ _COLS = (
 _COLS_SQL = ", ".join(_COLS)
 
 
+async def list_for_owner(owner_id: str, limit: int = 10000) -> list[dict]:
+    """Used by /me/data export. Tenant-scoped via RLS on PG."""
+    if is_postgres():
+        async with pg.with_user(owner_id) as conn:
+            recs = await conn.fetch(
+                f"SELECT {_COLS_SQL} FROM events ORDER BY created_at DESC LIMIT $1", limit,
+            )
+        return rows_to_dicts(recs)
+    cursor = _mongo.db().events.find({"owner_id": owner_id}, {"_id": 0}).sort("created_at", -1).limit(limit)
+    return await cursor.to_list(limit)
+
+
 async def insert(doc: dict) -> None:
     if is_postgres():
         async with pg.with_user(doc["owner_id"]) as conn:

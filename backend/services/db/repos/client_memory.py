@@ -24,6 +24,16 @@ _COLS = (
 _COLS_SQL = ", ".join(_COLS)
 
 
+async def list_for_owner(owner_id: str, limit: int = 10000) -> list[dict]:
+    """Used by /me/data export."""
+    if is_postgres():
+        async with pg.with_user(owner_id) as conn:
+            recs = await conn.fetch(f"SELECT {_COLS_SQL} FROM client_memory LIMIT $1", limit)
+        return [row_to_dict(r) for r in recs]
+    cursor = _mongo.db().client_memory.find({"owner_id": owner_id}, {"_id": 0}).limit(limit)
+    return await cursor.to_list(limit)
+
+
 async def get(owner_id: str, client_id: str) -> Optional[dict]:
     if is_postgres():
         async with pg.with_user(owner_id) as conn:

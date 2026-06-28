@@ -538,6 +538,62 @@ async def logout(user: dict = Depends(get_current_user)):
     return None
 
 
+# ---------- DPDP: data export + account deletion ----------
+@api.get("/me/data")
+async def export_my_data(user: dict = Depends(get_current_user)):
+    """Full JSON dump of everything Revora stores about the caller's tenant.
+    The DPDP Act requires us to make this available on request — this endpoint
+    delivers in O(seconds) for a typical tenant."""
+    uid = user["id"]
+    clients, proposals, invoices, activities, followups, events, memory = await asyncio.gather(
+        clients_repo.list_for_owner(uid),
+        proposals_repo.list_for_owner(uid),
+        invoices_repo.list_for_owner(uid),
+        activities_repo.list_for_owner(uid, limit=10000),
+        followups_repo.list_for_owner(uid),
+        events_repo.list_for_owner(uid),
+        memory_repo.list_for_owner(uid),
+    )
+    await append_audit(
+        action="me.data.export",
+        actor_id=uid, actor_email=user["email"],
+        resource_type="user", resource_id=uid,
+        payload={"counts": {
+            "clients": len(clients), "proposals": len(proposals),
+            "invoices": len(invoices), "activities": len(activities),
+            "followups": len(followups), "events": len(events),
+            "client_memory": len(memory),
+        }},
+    )
+    return {
+        "exported_at": now_utc().isoformat(),
+        "user": public_user(user),
+        "clients": clients,
+        "proposals": proposals,
+        "invoices": invoices,
+        "activities": activities,
+        "followups": followups,
+        "events": events,
+        "client_memory": memory,
+    }
+
+
+@api.delete("/me", status_code=204)
+async def delete_my_account(user: dict = Depends(get_current_user)):
+    """Delete the caller + every owned record. Postgres uses FK cascades;
+    Mongo deletes per collection. The audit row is appended BEFORE the user
+    row is gone (the chain doesn't lose the deletion fact)."""
+    uid = user["id"]
+    # Audit first — otherwise the deleted user's id is meaningless in logs.
+    await append_audit(
+        action="me.account.delete",
+        actor_id=uid, actor_email=user["email"],
+        resource_type="user", resource_id=uid,
+    )
+    await users_repo.delete_user_cascade(uid)
+    return None
+
+
 # ---------- Clients ----------
 @api.get("/clients")
 async def list_clients(user: dict = Depends(get_current_user)):

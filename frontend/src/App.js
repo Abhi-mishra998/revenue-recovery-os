@@ -14,6 +14,7 @@ import Invoices from "@/pages/Invoices";
 import Clients from "@/pages/Clients";
 import ClientDetail from "@/pages/ClientDetail";
 import Admin from "@/pages/Admin";
+import Settings from "@/pages/Settings";
 
 function Protected({ children }) {
   const { user, loading } = useAuth();
@@ -59,6 +60,7 @@ function AppRouter() {
         <Route path="/clients" element={<Clients />} />
         <Route path="/clients/:id" element={<ClientDetail />} />
         <Route path="/admin" element={<Admin />} />
+        <Route path="/settings" element={<Settings />} />
       </Route>
 
       <Route path="*" element={<Navigate to="/" replace />} />

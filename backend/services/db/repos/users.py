@@ -47,6 +47,23 @@ async def set_password_hash(user_id: str, password_hash: str) -> None:
     await _mongo.db().users.update_one({"id": user_id}, {"$set": {"password_hash": password_hash}})
 
 
+async def delete_user_cascade(user_id: str) -> None:
+    """Delete the user + every row that references them.
+    Postgres: FK ON DELETE CASCADE handles it in one DELETE.
+    Mongo: explicit delete_many per collection (no FKs)."""
+    if is_postgres():
+        async with pg.bypass_user() as conn:
+            await conn.execute("DELETE FROM users WHERE id = $1::uuid", user_id)
+        return
+    mdb = _mongo.db()
+    for coll in (
+        "client_memory", "events", "followups", "activities",
+        "invoices", "proposals", "clients",
+    ):
+        await mdb[coll].delete_many({"owner_id": user_id})
+    await mdb.users.delete_one({"id": user_id})
+
+
 # ---------- postgres impls (admin / cross-tenant — bypass RLS) ----------
 
 
