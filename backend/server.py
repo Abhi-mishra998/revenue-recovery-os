@@ -13,11 +13,14 @@ import jwt
 from datetime import datetime, timezone, timedelta
 from typing import List, Optional, Literal
 
-from fastapi import FastAPI, APIRouter, Depends, HTTPException
+from fastapi import FastAPI, APIRouter, Depends, HTTPException, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel, EmailStr, Field
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
 
 from services.seed import seed_demo_for_owner
 from services.ai import generate_proposal_followup, NoApiKeyError
@@ -35,6 +38,31 @@ EMERGENT_AUTH_SESSION_URL = "https://demobackend.emergentagent.com/auth/v1/env/o
 app = FastAPI(title="Revora — Revenue Recovery OS")
 api = APIRouter(prefix="/api")
 bearer_scheme = HTTPBearer(auto_error=False)
+
+
+def _user_or_ip_key(request: Request) -> str:
+    """Rate-limit key: authenticated user id when available, else IP."""
+    auth = request.headers.get("authorization", "")
+    if auth.lower().startswith("bearer "):
+        try:
+            payload = jwt.decode(
+                auth.split(None, 1)[1].strip(),
+                JWT_SECRET, algorithms=[JWT_ALG],
+                options={"verify_exp": False},
+            )
+            sub = payload.get("sub")
+            if sub:
+                return f"user:{sub}"
+        except Exception:
+            pass
+    return f"ip:{get_remote_address(request)}"
+
+
+# `RATE_LIMIT_ENABLED=false` disables limits — for test/CI runs that share an IP.
+_rate_limit_enabled = os.environ.get("RATE_LIMIT_ENABLED", "true").lower() == "true"
+limiter = Limiter(key_func=get_remote_address, enabled=_rate_limit_enabled)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 
 # ---------- Helpers ----------
@@ -261,7 +289,8 @@ def serialize_invoice(inv: dict, clients_map: Optional[dict] = None) -> dict:
 
 # ---------- Auth endpoints ----------
 @api.post("/auth/register")
-async def register(req: RegisterReq):
+@limiter.limit("10/minute")
+async def register(request: Request, req: RegisterReq):
     email = req.email.lower()
     existing = await db.users.find_one({"email": email})
     if existing:
@@ -281,7 +310,8 @@ async def register(req: RegisterReq):
 
 
 @api.post("/auth/login")
-async def login(req: LoginReq):
+@limiter.limit("30/minute")
+async def login(request: Request, req: LoginReq):
     email = req.email.lower()
     user = await db.users.find_one({"email": email})
     if not user or not verify_password(req.password, user.get("password_hash", "")):
@@ -291,7 +321,8 @@ async def login(req: LoginReq):
 
 
 @api.post("/auth/google/session")
-async def google_session(req: GoogleSessionReq):
+@limiter.limit("30/minute")
+async def google_session(request: Request, req: GoogleSessionReq):
     """
     Exchange an Emergent Google OAuth session_id (received in URL fragment on
     redirect back) for a Revora JWT bearer token.
@@ -592,7 +623,8 @@ async def dashboard_summary(user: dict = Depends(get_current_user)):
 
 
 @api.post("/proposals/{proposal_id}/generate-followup")
-async def generate_followup_for_proposal(proposal_id: str, user: dict = Depends(get_current_user)):
+@limiter.limit("10/hour", key_func=_user_or_ip_key)
+async def generate_followup_for_proposal(request: Request, proposal_id: str, user: dict = Depends(get_current_user)):
     """
     Generate TWO drafts (WhatsApp + Email) for a proposal using the configured LLM.
     Saves each draft to a FollowUp record. Never sends anything.
