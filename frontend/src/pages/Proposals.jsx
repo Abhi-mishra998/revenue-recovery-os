@@ -73,7 +73,7 @@ export default function Proposals() {
         <div>
           <div className="text-[11px] uppercase tracking-[0.08em] text-zinc-500 font-medium">Pipeline</div>
           <h1 className="text-[28px] md:text-[32px] font-semibold mt-1 text-zinc-900 tracking-tight">Proposals</h1>
-          <p className="text-[13.5px] text-zinc-500 mt-1.5">Auto status: Active ≤ 7d · Cold 8–14d · Dead 15d+ since last contact.</p>
+          <p className="text-[13.5px] text-zinc-500 mt-1.5">Auto status: Active ≤ 7d · Cold 8–21d · Dead 22d+ since last contact.</p>
         </div>
         <div className="flex items-center gap-2">
           <button className="cta-ghost" onClick={() => setBulkOpen(true)} data-testid="bulk-add-proposals-btn">

@@ -134,13 +134,14 @@ async def assert_owns(collection: str, doc_id: str, user: dict) -> None:
 
 # ---------- Status compute (RULE: never typed by user) ----------
 def compute_proposal_status(last_contact_date: str) -> str:
+    """Locked PRD thresholds: active ≤7d, cold 8-21d, dead >21d."""
     last = datetime.fromisoformat(last_contact_date)
     if last.tzinfo is None:
         last = last.replace(tzinfo=timezone.utc)
     days = (now_utc() - last).days
     if days <= 7:
         return "active"
-    if days <= 14:
+    if days <= 21:
         return "cold"
     return "dead"
 
