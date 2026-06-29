@@ -16,7 +16,7 @@ from typing import List, Literal, Optional
 import bcrypt
 import httpx
 import jwt
-from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
+from fastapi import APIRouter, Depends, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel, EmailStr, Field
@@ -32,8 +32,19 @@ from services.ai import (
     NoApiKeyError,
     generate_proposal_followup,
 )
+from services.ai.brief import generate_brief, template_fallback
+from services.ai.client import generate_json
+from services.ai.schemas import MappingSuggestion
 from services.audit import append_audit, get_public_key_fp, load_signing_key, verify_chain
 from services.data import extract_proposal_features, predict_close_probability
+from services.data import revenue_health as rh
+from services.data.import_commit import (
+    build_client_doc,
+    build_invoice_doc,
+    build_proposal_doc,
+)
+from services.data.import_heuristics import analyze_file
+from services.data.import_mapping import LLM_SYSTEM, heuristic_mapping, llm_user_prompt
 from services.db import is_mongo, is_postgres
 from services.db import pg as pgdb
 from services.db.repos import (
@@ -53,6 +64,12 @@ from services.db.repos import (
 )
 from services.db.repos import (
     followups as followups_repo,
+)
+from services.db.repos import (
+    health_snapshots as health_snapshots_repo,
+)
+from services.db.repos import (
+    import_jobs as import_jobs_repo,
 )
 from services.db.repos import (
     invoices as invoices_repo,
@@ -94,6 +111,7 @@ def _validate_boot_secrets() -> None:
             # Not fatal — auto-gen still works — but loud, because a process restart
             # without env-pinned key + without persisted settings = chain break.
             import logging as _l
+
             _l.getLogger(__name__).warning(
                 "ENV=production but AUDIT_SIGNING_KEY not set. Audit chain depends on "
                 "the auto-generated key surviving in db.settings."
@@ -221,22 +239,25 @@ async def get_current_user(creds: Optional[HTTPAuthorizationCredentials] = Depen
     return user
 
 
+def _admin_emails() -> set[str]:
+    """Set of admin emails (lowercased). ADMIN_EMAILS (CSV) takes precedence;
+    ADMIN_EMAIL is a backward-compat single-value fallback."""
+    raw = os.environ.get("ADMIN_EMAILS") or os.environ.get("ADMIN_EMAIL") or ""
+    return {e.strip().lower() for e in raw.split(",") if e.strip()}
+
+
 def public_user(u: dict) -> dict:
-    admin_email = (os.environ.get("ADMIN_EMAIL") or "").strip().lower()
     return {
         "id": u["id"],
         "email": u["email"],
         "name": u.get("name", ""),
         "auth_provider": u.get("auth_provider", "email"),
-        "is_admin": bool(admin_email) and u["email"].lower() == admin_email,
+        "is_admin": u["email"].lower() in _admin_emails(),
     }
 
 
 def require_admin(user: dict = Depends(get_current_user)) -> dict:
-    """Authorize the configured ADMIN_EMAIL only. ponytail: single-admin model
-    is enough for now; switch to a roles collection when there's a second admin."""
-    admin_email = (os.environ.get("ADMIN_EMAIL") or "").strip().lower()
-    if not admin_email or user["email"].lower() != admin_email:
+    if user["email"].lower() not in _admin_emails():
         raise HTTPException(status_code=403, detail="Admin only")
     return user
 
@@ -556,14 +577,21 @@ async def export_my_data(user: dict = Depends(get_current_user)):
     )
     await append_audit(
         action="me.data.export",
-        actor_id=uid, actor_email=user["email"],
-        resource_type="user", resource_id=uid,
-        payload={"counts": {
-            "clients": len(clients), "proposals": len(proposals),
-            "invoices": len(invoices), "activities": len(activities),
-            "followups": len(followups), "events": len(events),
-            "client_memory": len(memory),
-        }},
+        actor_id=uid,
+        actor_email=user["email"],
+        resource_type="user",
+        resource_id=uid,
+        payload={
+            "counts": {
+                "clients": len(clients),
+                "proposals": len(proposals),
+                "invoices": len(invoices),
+                "activities": len(activities),
+                "followups": len(followups),
+                "events": len(events),
+                "client_memory": len(memory),
+            }
+        },
     )
     return {
         "exported_at": now_utc().isoformat(),
@@ -587,8 +615,10 @@ async def delete_my_account(user: dict = Depends(get_current_user)):
     # Audit first — otherwise the deleted user's id is meaningless in logs.
     await append_audit(
         action="me.account.delete",
-        actor_id=uid, actor_email=user["email"],
-        resource_type="user", resource_id=uid,
+        actor_id=uid,
+        actor_email=user["email"],
+        resource_type="user",
+        resource_id=uid,
     )
     await users_repo.delete_user_cascade(uid)
     return None
@@ -1356,32 +1386,692 @@ async def migrate_legacy_fields():
 # ---------- Seed admin (email/password) ----------
 async def seed_admin():
     """
-    Create the admin user on first boot only. After that, never touch the
-    password — rotation is the user's responsibility, not the server's.
-    Requires ADMIN_PASSWORD env var if no admin exists yet; otherwise no-op.
+    Ensure each configured admin (ADMIN_EMAILS, CSV) exists. Creates missing
+    users with ADMIN_PASSWORD if set. Demo data is NOT seeded on boot —
+    callers use POST /api/import/seed-demo explicitly so real-data tenants
+    stay clean.
     """
-    admin_email = os.environ.get("ADMIN_EMAIL", "founder@bytehubble.com").lower()
-    existing = await users_repo.get_by_email(admin_email)
-    if existing is not None:
-        await seed_demo_for_owner(owner_id=existing["id"])
-        return
+    emails = _admin_emails() or {"founder@bytehubble.com"}
     admin_password = os.environ.get("ADMIN_PASSWORD")
-    if not admin_password:
-        logger.warning("ADMIN_PASSWORD not set and no admin user exists — skipping admin seed.")
-        return
-    user_id = str(uuid.uuid4())
-    await users_repo.insert(
+    for admin_email in emails:
+        if await users_repo.get_by_email(admin_email) is not None:
+            continue
+        if not admin_password:
+            logger.warning("ADMIN_PASSWORD not set and admin %s does not exist — skipping.", admin_email)
+            continue
+        await users_repo.insert(
+            {
+                "id": str(uuid.uuid4()),
+                "email": admin_email,
+                "name": "ByteHubble Founder",
+                "auth_provider": "email",
+                "password_hash": hash_password(admin_password),
+                "token_version": 0,
+                "created_at": now_utc().isoformat(),
+            }
+        )
+
+
+# ---------- Importer (Day 1 onboarding) ----------
+class ImportMapReq(BaseModel):
+    file_id: str
+    target: Literal["clients", "proposals", "invoices"]
+
+
+class ImportCommitReq(BaseModel):
+    file_id: str
+    mapping: Optional[dict[str, str]] = None  # optional override; default uses stored mapping
+
+
+@api.post("/import/parse")
+@limiter.limit("20/hour", key_func=_user_or_ip_key)
+async def import_parse(
+    request: Request,
+    file: UploadFile = File(...),
+    user: dict = Depends(get_current_user),
+):
+    """Stage 1 of the importer. Reads a CSV, derives column types, data
+    quality, and quick signals in one pass. Persists everything to import_jobs
+    so the founder can retry /map without re-uploading."""
+    content = await file.read()
+    if not content:
+        raise HTTPException(400, "Empty file")
+    try:
+        result = analyze_file(content, filename=file.filename or "")
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+    file_id = await import_jobs_repo.create(
+        owner_id=user["id"],
+        headers=result["headers"],
+        sample_rows=result["sample_rows"],
+        raw_rows=result["raw_rows"],
+        stats={
+            "column_types": result["column_types"],
+            "data_quality": result["data_quality"],
+            "quick_signals": result["quick_signals"],
+        },
+    )
+    await append_audit(
+        action="import.parse",
+        actor_id=user["id"],
+        actor_email=user["email"],
+        resource_type="import_job",
+        resource_id=file_id,
+        payload={"rows": result["data_quality"]["rows"]},
+    )
+    return {
+        "file_id": file_id,
+        "headers": result["headers"],
+        "sample_rows": result["sample_rows"],
+        "column_types": result["column_types"],
+        "data_quality": result["data_quality"],
+        "quick_signals": result["quick_signals"],
+    }
+
+
+@api.post("/import/map")
+@limiter.limit("30/hour", key_func=_user_or_ip_key)
+async def import_map(
+    request: Request,
+    req: ImportMapReq,
+    user: dict = Depends(get_current_user),
+):
+    """Stage 2 of the importer. Returns both:
+      * heuristic_mapping — pure-Python guess (always populated)
+      * ai_mapping — LLM-suggested mapping (None if LLM unavailable/malformed)
+    The LLM's mapping is persisted to import_jobs as the proposed mapping;
+    if the LLM is down we fall back to the heuristic. The UI is expected to
+    let the founder confirm/override either way."""
+    job = await import_jobs_repo.get(req.file_id, user["id"])
+    if job is None:
+        raise HTTPException(404, "Import job not found")
+    headers: list[str] = job["headers"]
+    sample_rows: list[dict] = job["sample_rows"]
+
+    heuristic = heuristic_mapping(headers, req.target)
+    ai_mapping = None
+    ai_error = None
+    try:
+        suggestion = await generate_json(
+            system=LLM_SYSTEM,
+            user=llm_user_prompt(req.target, headers, sample_rows),
+            schema=MappingSuggestion,
+            max_tokens=800,
+        )
+        ai_mapping = [m.model_dump() for m in suggestion.mappings]
+    except (LLMProviderUnavailable, NoApiKeyError, MalformedOutputError) as e:
+        logger.warning("import.map LLM unavailable: %s", e)
+        ai_error = type(e).__name__
+
+    # Persist whichever is non-null, preferring AI. Founder can still override
+    # via /commit's `mapping` body.
+    chosen = ai_mapping or heuristic
+    flat = {m["target_field"]: m["source_header"] for m in chosen if m["source_header"]}
+    await import_jobs_repo.set_mapping(req.file_id, user["id"], mapping=flat, target=req.target)
+    await append_audit(
+        action="import.map",
+        actor_id=user["id"],
+        actor_email=user["email"],
+        resource_type="import_job",
+        resource_id=req.file_id,
+        payload={"target": req.target, "ai": ai_mapping is not None, "fields_mapped": len(flat)},
+    )
+    return {
+        "file_id": req.file_id,
+        "target": req.target,
+        "heuristic_mapping": heuristic,
+        "ai_mapping": ai_mapping,
+        "ai_error": ai_error,
+    }
+
+
+@api.post("/import/seed-demo")
+@limiter.limit("5/hour", key_func=_user_or_ip_key)
+async def import_seed_demo(request: Request, user: dict = Depends(get_current_user)):
+    """One-click path for the 'Use Demo Data' onboarding card. Wraps the
+    existing seed_demo_for_owner, which is idempotent — returns 409 if the
+    tenant already has data so we never overwrite real ByteHubble rows."""
+    result = await seed_demo_for_owner(owner_id=user["id"])
+    if result.get("skipped"):
+        raise HTTPException(409, "Existing data present — demo seed refused")
+    await append_audit(
+        action="import.seed_demo",
+        actor_id=user["id"],
+        actor_email=user["email"],
+        resource_type="user",
+        resource_id=user["id"],
+        payload=result,
+    )
+    return result
+
+
+class PersonalizeReq(BaseModel):
+    preferred_channel: Literal["whatsapp", "email", "phone"]
+    follow_up_days: Literal[3, 7, 14]
+    priority: Literal["cash", "close", "relationship"]
+
+
+# ---------- Revenue Health (Day 2 — pure SQL/Python, NO LLM) ----------
+async def _memory_map_for(owner_id: str) -> dict:
+    rows = await memory_repo.list_for_owner(owner_id)
+    return {m["client_id"]: m for m in rows}
+
+
+@api.get("/revenue-health")
+async def revenue_health(user: dict = Depends(get_current_user)):
+    """Single payload backing /health. Pure SQL/Python — never blocks on LLM.
+    Snapshot upserted for today on each call (1 row/day max) so the delta
+    arrow on the visibility score reflects real history."""
+    if not is_postgres():
+        raise HTTPException(503, "Postgres engine required")
+    proposals, invoices, clients_map, memory_map, tenant_profile = await asyncio.gather(
+        proposals_repo.list_for_owner(user["id"]),
+        invoices_repo.list_for_owner(user["id"]),
+        _clients_map_for(user["id"]),
+        _memory_map_for(user["id"]),
+        users_repo.get_tenant_profile(user["id"]),
+    )
+    payload = rh.compute(
+        proposals=proposals,
+        invoices=invoices,
+        clients_map=clients_map,
+        memory_map=memory_map,
+        tenant_profile=tenant_profile,
+    )
+
+    # Fill delta arrow from prior snapshot (if any) BEFORE writing today's.
+    from datetime import date as _date
+
+    prior = await health_snapshots_repo.latest_before(user["id"], _date.today())
+    if prior and prior.get("payload"):
+        prior_score = (prior["payload"].get("visibility_score") or {}).get("score")
+        if isinstance(prior_score, int):
+            delta_val = payload["visibility_score"]["score"] - prior_score
+            arrow = "↑" if delta_val > 0 else "↓" if delta_val < 0 else "→"
+            payload["visibility_score"]["delta"] = {
+                "arrow": arrow,
+                "value": delta_val,
+                "since_date": str(prior["snapshot_date"]),
+            }
+
+    await health_snapshots_repo.upsert_today(user["id"], payload)
+    await append_audit(
+        action="revenue_health.read",
+        actor_id=user["id"],
+        actor_email=user["email"],
+        resource_type="user",
+        resource_id=user["id"],
+        payload={"score": payload["visibility_score"]["score"]},
+    )
+    return payload
+
+
+class RecommendationFeedbackReq(BaseModel):
+    thumb: Literal["up", "down"]
+    outcome: Optional[Literal["replied", "meeting_booked", "closed_won", "no_reply", "closed_lost"]] = None
+
+
+@api.post("/recommendations/{recommendation_id}/feedback")
+@limiter.limit("60/hour", key_func=_user_or_ip_key)
+async def recommendation_feedback(
+    request: Request,
+    recommendation_id: str,
+    req: RecommendationFeedbackReq,
+    user: dict = Depends(get_current_user),
+):
+    """Learning Loop. recommendation_id == proposal_id (stable; no new table).
+    Writes a recommendation.feedback event row scoped to the owner via RLS."""
+    if not is_postgres():
+        raise HTTPException(503, "Postgres engine required")
+    if not await proposals_repo.exists_for_owner(recommendation_id, user["id"]):
+        raise HTTPException(404, "Recommendation not found")
+    await events_repo.insert(
         {
-            "id": user_id,
-            "email": admin_email,
-            "name": "ByteHubble Founder",
-            "auth_provider": "email",
-            "password_hash": hash_password(admin_password),
-            "token_version": 0,
+            "id": str(uuid.uuid4()),
+            "owner_id": user["id"],
+            "event_type": "recommendation.feedback",
+            "entity_type": "proposal",
+            "entity_id": recommendation_id,
+            "metadata": {"thumb": req.thumb, "outcome": req.outcome},
+            "source": "user",
             "created_at": now_utc().isoformat(),
         }
     )
-    await seed_demo_for_owner(owner_id=user_id)
+    await append_audit(
+        action="recommendation.feedback",
+        actor_id=user["id"],
+        actor_email=user["email"],
+        resource_type="proposal",
+        resource_id=recommendation_id,
+        payload={"thumb": req.thumb, "outcome": req.outcome},
+    )
+    return {"ok": True, "recommendation_id": recommendation_id, "thumb": req.thumb}
+
+
+@api.get("/impact")
+async def impact(user: dict = Depends(get_current_user)):
+    """Dashboard 'Impact this week' card. Zeros are honest on cold tenants —
+    no inflated marketing numbers. ponytail: 15 min/follow-up is a stake;
+    refine when real usage data shows the saved-minutes distribution."""
+    if not is_postgres():
+        raise HTTPException(503, "Postgres engine required")
+    week_ago = now_utc() - timedelta(days=7)
+    followups, proposals, memory = await asyncio.gather(
+        followups_repo.list_for_owner(user["id"]),
+        proposals_repo.list_for_owner(user["id"]),
+        memory_repo.list_for_owner(user["id"]),
+    )
+
+    def _parsed(iso: str):
+        try:
+            d = datetime.fromisoformat(iso)
+            return d if d.tzinfo else d.replace(tzinfo=timezone.utc)
+        except Exception:
+            return None
+
+    week_followups = []
+    for f in followups:
+        ts = _parsed(f.get("created_at", ""))
+        if ts is not None and ts >= week_ago:
+            week_followups.append(f)
+    proposal_ids_week = {f["proposal_id"] for f in week_followups}
+    revenue_protected = int(
+        sum(
+            float(p["value_inr"])
+            for p in proposals
+            if p["id"] in proposal_ids_week and p.get("stage") in ("sent", "negotiating")
+        )
+    )
+    rates = [m.get("response_rate") for m in memory if m.get("response_rate") is not None]
+    response_rate = round(sum(rates) / len(rates), 2) if rates else 0.0
+
+    return {
+        "followups_generated_week": len(week_followups),
+        "hours_saved_week": round(len(week_followups) * 15 / 60, 1),
+        "revenue_protected_week": revenue_protected,
+        "response_rate_week": response_rate,
+    }
+
+
+@api.get("/learning/aggregate")
+async def learning_aggregate(user: dict = Depends(get_current_user)):
+    """Rolling accuracy from recommendation.feedback events. Tenant-scoped."""
+    if not is_postgres():
+        raise HTTPException(503, "Postgres engine required")
+    events = await events_repo.list_filtered(user["id"], event_type="recommendation.feedback", limit=1000)
+    up = 0
+    down = 0
+    examples = []
+    for e in events:
+        meta = e.get("metadata") or {}
+        if meta.get("thumb") == "up":
+            up += 1
+        elif meta.get("thumb") == "down":
+            down += 1
+        if len(examples) < 5:
+            examples.append(
+                {
+                    "recommendation_id": e.get("entity_id"),
+                    "thumb": meta.get("thumb"),
+                    "outcome": meta.get("outcome"),
+                    "created_at": e.get("created_at"),
+                }
+            )
+    total = up + down
+    accuracy_pct = round(100 * up / total) if total else None
+    return {
+        "thumbs_up_count": up,
+        "thumbs_down_count": down,
+        "accuracy_pct": accuracy_pct,
+        "recent_examples": examples,
+    }
+
+
+# ---------- Morning Brief (Day 3 — the one LLM endpoint added today) ----------
+async def _compose_brief(user: dict, *, force: bool = False) -> dict:
+    """Returns the brief dict ({date, brief, recommendation_ids, source}).
+    Cached on users.daily_brief — same-day reads short-circuit unless force=True."""
+    from datetime import date as _date
+
+    today_iso = _date.today().isoformat()
+    cached = await users_repo.get_daily_brief(user["id"])
+    if not force and cached and cached.get("date") == today_iso:
+        return cached
+
+    proposals, clients_map, memory_map, tenant_profile = await asyncio.gather(
+        proposals_repo.list_for_owner(user["id"]),
+        _clients_map_for(user["id"]),
+        _memory_map_for(user["id"]),
+        users_repo.get_tenant_profile(user["id"]),
+    )
+    actions = rh.top_actions(
+        proposals=proposals,
+        clients_map=clients_map,
+        memory_map=memory_map,
+        tenant_profile=tenant_profile,
+        limit=3,
+    )
+    recommendation_ids = [a["id"] for a in actions]
+    source = "llm"
+    try:
+        draft = await generate_brief(
+            actions=actions,
+            clients_map=clients_map,
+            tenant_profile=tenant_profile,
+            founder_name=(user.get("name") or "").split()[0] if user.get("name") else "",
+        )
+        brief = draft.model_dump()
+    except (LLMProviderUnavailable, NoApiKeyError, MalformedOutputError) as e:
+        logger.warning("brief.today LLM fallback: %s", e)
+        source = "template_fallback"
+        brief = template_fallback(
+            actions=actions,
+            clients_map=clients_map,
+            founder_name=(user.get("name") or "").split()[0] if user.get("name") else "",
+        )
+
+    payload = {
+        "date": today_iso,
+        "brief": brief,
+        "recommendation_ids": recommendation_ids,
+        "source": source,
+        "generated_at": now_utc().isoformat(),
+    }
+    await users_repo.set_daily_brief(user["id"], payload)
+    return payload
+
+
+@api.get("/brief/today")
+async def brief_today(user: dict = Depends(get_current_user)):
+    """Morning Brief — one LLM call/day cached on users.daily_brief.
+    Returns shape: {date, brief:{headline,paragraph,confidence}, source, recommendation_ids}."""
+    if not is_postgres():
+        raise HTTPException(503, "Postgres engine required")
+    return await _compose_brief(user)
+
+
+@api.post("/brief/refresh")
+@limiter.limit("3/day", key_func=_user_or_ip_key)
+async def brief_refresh(request: Request, user: dict = Depends(get_current_user)):
+    """Force a regen. Rate-limited so the LLM doesn't get hammered."""
+    if not is_postgres():
+        raise HTTPException(503, "Postgres engine required")
+    payload = await _compose_brief(user, force=True)
+    await append_audit(
+        action="brief.refresh",
+        actor_id=user["id"],
+        actor_email=user["email"],
+        resource_type="user",
+        resource_id=user["id"],
+        payload={"source": payload["source"]},
+    )
+    return payload
+
+
+@api.get("/today")
+async def today(limit: int = 5, user: dict = Depends(get_current_user)):
+    """Dashboard 'Today's Recovery' card. Same ranking as /revenue-health's
+    do_these_today; caller picks limit."""
+    if not is_postgres():
+        raise HTTPException(503, "Postgres engine required")
+    proposals, clients_map, memory_map, tenant_profile = await asyncio.gather(
+        proposals_repo.list_for_owner(user["id"]),
+        _clients_map_for(user["id"]),
+        _memory_map_for(user["id"]),
+        users_repo.get_tenant_profile(user["id"]),
+    )
+    rows = rh.top_actions(
+        proposals=proposals,
+        clients_map=clients_map,
+        memory_map=memory_map,
+        tenant_profile=tenant_profile,
+        limit=max(1, min(20, limit)),
+    )
+    return {"rows": rows, "estimated_total_minutes": sum(r["estimated_minutes"] for r in rows)}
+
+
+@api.get("/health/diff")
+async def health_diff(since: Optional[str] = None, user: dict = Depends(get_current_user)):
+    """Snapshot delta for the dashboard 'What Changed' card (Day 3).
+    Default `since` = most recent prior snapshot. 200 with `available: False`
+    when there's no prior snapshot to diff against."""
+    if not is_postgres():
+        raise HTTPException(503, "Postgres engine required")
+    from datetime import date as _date
+
+    target_date = _date.fromisoformat(since) if since else _date.today()
+    prior = await health_snapshots_repo.latest_before(user["id"], target_date)
+    today_snap = await health_snapshots_repo.get_for_date(user["id"], _date.today())
+    if not prior or not today_snap:
+        return {"available": False, "reason": "Need ≥2 snapshots to compute a diff"}
+
+    def _score(snap):
+        return ((snap.get("payload") or {}).get("visibility_score") or {}).get("score") or 0
+
+    def _do_today_value(snap):
+        rows = (snap.get("payload") or {}).get("do_these_today") or []
+        return sum(int(r.get("value_inr") or 0) for r in rows)
+
+    from_score = _score(prior)
+    to_score = _score(today_snap)
+    return {
+        "available": True,
+        "from_date": str(prior["snapshot_date"]),
+        "to_date": str(today_snap["snapshot_date"]),
+        "visibility": {"from": from_score, "to": to_score, "delta": to_score - from_score},
+        "recovery_inr_delta": _do_today_value(today_snap) - _do_today_value(prior),
+    }
+
+
+@api.post("/personalize")
+async def personalize(req: PersonalizeReq, user: dict = Depends(get_current_user)):
+    """'Improve My Recommendations' card. Three answers steer ranking + (Day 3)
+    Brief tone. Stored on users.tenant_profile."""
+    profile = {
+        "preferred_channel": req.preferred_channel,
+        "follow_up_days": req.follow_up_days,
+        "priority": req.priority,
+    }
+    await users_repo.set_tenant_profile(user["id"], profile)
+    await append_audit(
+        action="personalize.submit",
+        actor_id=user["id"],
+        actor_email=user["email"],
+        resource_type="user",
+        resource_id=user["id"],
+        payload=profile,
+    )
+    return {"ok": True, "tenant_profile": profile}
+
+
+@api.get("/onboarding/state")
+async def onboarding_state(user: dict = Depends(get_current_user)):
+    """Lightweight gate for App.jsx routing. has_personalized is a Day 2
+    field (settings.tenant_profile not yet shipped) and always reads false
+    until Personalize/Improve My Recommendations lands."""
+    if not is_postgres():
+        raise HTTPException(503, "Postgres engine required")
+    async with pgdb.with_user(user["id"]) as conn:
+        cc = await conn.fetchval("SELECT COUNT(*)::int FROM clients")
+        pc = await conn.fetchval("SELECT COUNT(*)::int FROM proposals")
+        ic = await conn.fetchval("SELECT COUNT(*)::int FROM invoices")
+    profile = await users_repo.get_tenant_profile(user["id"])
+    return {
+        "has_data": (cc or 0) > 0,
+        "has_personalized": profile is not None,
+        "clients_count": cc or 0,
+        "proposals_count": pc or 0,
+        "invoices_count": ic or 0,
+    }
+
+
+@api.post("/import/commit")
+@limiter.limit("10/hour", key_func=_user_or_ip_key)
+async def import_commit(
+    request: Request,
+    req: ImportCommitReq,
+    user: dict = Depends(get_current_user),
+):
+    """Stage 3 of the importer. Drains raw_rows into clients/proposals/invoices
+    inside a single RLS-scoped transaction. For proposals/invoices targets,
+    missing clients are auto-created (look up by company_name, lowercase,
+    per owner). One audit event per commit, row counts only.
+
+    ponytail: inline SQL keeps the whole import in one with_user() transaction
+    without threading conn through repo methods. Refactor when a second caller
+    needs the same bulk path."""
+    if not is_postgres():
+        raise HTTPException(503, "Postgres engine required for importer")
+    job = await import_jobs_repo.get(req.file_id, user["id"])
+    if job is None:
+        raise HTTPException(404, "Import job not found")
+    if job["stage"] == "committed":
+        raise HTTPException(409, "Import already committed")
+    target = job.get("target")
+    if not target:
+        raise HTTPException(400, "Import has no target — call /import/map first")
+
+    mapping = req.mapping if req.mapping is not None else (job.get("mapping") or {})
+    if not mapping:
+        raise HTTPException(400, "Empty mapping — cannot commit")
+    raw_rows: list[dict] = job["raw_rows"] or []
+    owner_id = user["id"]
+
+    clients_inserted = proposals_inserted = invoices_inserted = 0
+    skipped = 0
+
+    async with pgdb.with_user(owner_id) as conn:
+        # Cache lookup for client_name -> client_id within this commit, lowercased.
+        client_cache: dict[str, str] = {}
+        # Prefill with any existing clients so we don't duplicate.
+        recs = await conn.fetch("SELECT id::text, lower(company_name) AS k FROM clients")
+        for r in recs:
+            client_cache[r["k"]] = r["id"]
+
+        async def _ensure_client(name: str) -> str:
+            key = name.lower().strip()
+            if key in client_cache:
+                return client_cache[key]
+            cid = str(uuid.uuid4())
+            now = now_utc().isoformat()
+            await conn.execute(
+                "INSERT INTO clients (id, owner_id, company_name, contact_name, language, created_at) "
+                "VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6)",
+                cid,
+                owner_id,
+                name,
+                "",
+                "English",
+                now,
+            )
+            client_cache[key] = cid
+            nonlocal clients_inserted
+            clients_inserted += 1
+            return cid
+
+        for row in raw_rows:
+            if target == "clients":
+                doc = build_client_doc(row, mapping, owner_id)
+                if doc is None:
+                    skipped += 1
+                    continue
+                if doc["company_name"].lower().strip() in client_cache:
+                    skipped += 1  # already exists; honor existing row
+                    continue
+                await conn.execute(
+                    "INSERT INTO clients (id, owner_id, company_name, contact_name, email, phone, "
+                    "whatsapp, industry, language, notes, created_at) "
+                    "VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
+                    doc["id"],
+                    doc["owner_id"],
+                    doc["company_name"],
+                    doc["contact_name"],
+                    doc["email"],
+                    doc["phone"],
+                    doc["whatsapp"],
+                    doc["industry"],
+                    doc["language"],
+                    doc["notes"],
+                    doc["created_at"],
+                )
+                client_cache[doc["company_name"].lower().strip()] = doc["id"]
+                clients_inserted += 1
+
+            elif target == "proposals":
+                client_name = row.get(mapping.get("client_name", ""), "")
+                if not client_name or not str(client_name).strip():
+                    skipped += 1
+                    continue
+                # Build with placeholder client_id first; only ensure_client
+                # if row is otherwise valid, so a bad row doesn't leave an
+                # orphan client behind.
+                doc = build_proposal_doc(row, mapping, owner_id, "placeholder")
+                if doc is None:
+                    skipped += 1
+                    continue
+                doc["client_id"] = await _ensure_client(str(client_name).strip())
+                await conn.execute(
+                    "INSERT INTO proposals (id, owner_id, client_id, title, value_inr, sent_date, "
+                    "last_contact_date, stage, outcome_at, notes, created_at) "
+                    "VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6, $7, $8, $9, $10, $11)",
+                    doc["id"],
+                    doc["owner_id"],
+                    doc["client_id"],
+                    doc["title"],
+                    doc["value_inr"],
+                    doc["sent_date"],
+                    doc["last_contact_date"],
+                    doc["stage"],
+                    doc["outcome_at"],
+                    doc["notes"],
+                    doc["created_at"],
+                )
+                proposals_inserted += 1
+
+            elif target == "invoices":
+                client_name = row.get(mapping.get("client_name", ""), "")
+                if not client_name or not str(client_name).strip():
+                    skipped += 1
+                    continue
+                doc = build_invoice_doc(row, mapping, owner_id, "placeholder")
+                if doc is None:
+                    skipped += 1
+                    continue
+                doc["client_id"] = await _ensure_client(str(client_name).strip())
+                await conn.execute(
+                    "INSERT INTO invoices (id, owner_id, client_id, invoice_no, amount_inr, due_date, "
+                    "paid_date, issued_at, notes, created_at) "
+                    "VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6, $7, $8, $9, $10)",
+                    doc["id"],
+                    doc["owner_id"],
+                    doc["client_id"],
+                    doc["invoice_no"],
+                    doc["amount_inr"],
+                    doc["due_date"],
+                    doc["paid_date"],
+                    doc["issued_at"],
+                    doc["notes"],
+                    doc["created_at"],
+                )
+                invoices_inserted += 1
+
+    await import_jobs_repo.mark_committed(req.file_id, owner_id)
+    counts = {
+        "clients_inserted": clients_inserted,
+        "proposals_inserted": proposals_inserted,
+        "invoices_inserted": invoices_inserted,
+        "skipped": skipped,
+    }
+    await append_audit(
+        action="import.commit",
+        actor_id=user["id"],
+        actor_email=user["email"],
+        resource_type="import_job",
+        resource_id=req.file_id,
+        payload={"target": target, **counts},
+    )
+    return {"file_id": req.file_id, "target": target, **counts}
 
 
 @api.get("/")
@@ -1407,6 +2097,7 @@ async def enforce_max_body_size(request: Request, call_next):
         try:
             if int(cl) > MAX_REQUEST_BYTES:
                 from starlette.responses import JSONResponse
+
                 return JSONResponse(
                     status_code=413,
                     content={

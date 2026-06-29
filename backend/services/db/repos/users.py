@@ -47,6 +47,68 @@ async def set_password_hash(user_id: str, password_hash: str) -> None:
     await _mongo.db().users.update_one({"id": user_id}, {"$set": {"password_hash": password_hash}})
 
 
+async def get_tenant_profile(user_id: str) -> Optional[dict]:
+    """Return the per-user JSON profile written by /api/personalize. Postgres only."""
+    if not is_postgres():
+        return None
+    async with pg.bypass_user() as conn:
+        row = await conn.fetchval("SELECT tenant_profile FROM users WHERE id = $1::uuid", user_id)
+    if not row:
+        return None
+    if isinstance(row, str):
+        import json
+
+        try:
+            return json.loads(row)
+        except Exception:
+            return None
+    return dict(row)
+
+
+async def get_daily_brief(user_id: str) -> Optional[dict]:
+    """Cached Morning Brief jsonb. Postgres only."""
+    if not is_postgres():
+        return None
+    async with pg.bypass_user() as conn:
+        row = await conn.fetchval("SELECT daily_brief FROM users WHERE id = $1::uuid", user_id)
+    if not row:
+        return None
+    if isinstance(row, str):
+        import json
+
+        try:
+            return json.loads(row)
+        except Exception:
+            return None
+    return dict(row)
+
+
+async def set_daily_brief(user_id: str, brief: dict) -> None:
+    if not is_postgres():
+        return
+    import json
+
+    async with pg.bypass_user() as conn:
+        await conn.execute(
+            "UPDATE users SET daily_brief = $1::jsonb WHERE id = $2::uuid",
+            json.dumps(brief),
+            user_id,
+        )
+
+
+async def set_tenant_profile(user_id: str, profile: dict) -> None:
+    if not is_postgres():
+        return
+    import json
+
+    async with pg.bypass_user() as conn:
+        await conn.execute(
+            "UPDATE users SET tenant_profile = $1::jsonb WHERE id = $2::uuid",
+            json.dumps(profile),
+            user_id,
+        )
+
+
 async def delete_user_cascade(user_id: str) -> None:
     """Delete the user + every row that references them.
     Postgres: FK ON DELETE CASCADE handles it in one DELETE.
@@ -57,8 +119,13 @@ async def delete_user_cascade(user_id: str) -> None:
         return
     mdb = _mongo.db()
     for coll in (
-        "client_memory", "events", "followups", "activities",
-        "invoices", "proposals", "clients",
+        "client_memory",
+        "events",
+        "followups",
+        "activities",
+        "invoices",
+        "proposals",
+        "clients",
     ):
         await mdb[coll].delete_many({"owner_id": user_id})
     await mdb.users.delete_one({"id": user_id})

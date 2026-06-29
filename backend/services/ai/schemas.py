@@ -14,6 +14,31 @@ from typing import Optional
 from pydantic import BaseModel, Field
 
 
+class FieldMapping(BaseModel):
+    """One column mapping suggestion. source_header is None when the LLM can't
+    find a plausible match — UI shows 'unmapped' rather than guessing."""
+
+    target_field: str = Field(..., min_length=1, max_length=64)
+    source_header: Optional[str] = Field(default=None, max_length=200)
+    confidence: float = Field(..., ge=0.0, le=1.0)
+
+
+class MappingSuggestion(BaseModel):
+    """LLM-proposed column mapping. The endpoint also returns a heuristic
+    mapping computed locally; the UI picks whichever the founder confirms."""
+
+    mappings: list[FieldMapping] = Field(..., min_length=1, max_length=32)
+
+
+class BriefDraft(BaseModel):
+    """Morning Brief output. 60-120 words, names up to 3 clients with reasons
+    and one-line actions. Bounded sizes so a runaway model can't drown the UI."""
+
+    headline: str = Field(..., min_length=5, max_length=120)
+    paragraph: str = Field(..., min_length=40, max_length=900)
+    confidence: float = Field(..., ge=0.0, le=1.0)
+
+
 class FollowUpDraft(BaseModel):
     """One LLM call produces both channels. Bounded sizes — runaway output
     is rejected before it reaches the user."""

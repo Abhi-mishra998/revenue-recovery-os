@@ -28,8 +28,8 @@ export default function Clients() {
     <div className="p-6 md:p-10 max-w-[1300px] mx-auto" data-testid="clients-page">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <div className="text-[11px] uppercase tracking-[0.08em] text-zinc-500 font-medium">Roster</div>
-          <h1 className="text-[28px] md:text-[32px] font-semibold mt-1 text-zinc-900 tracking-tight">Clients</h1>
+          <div className="eyebrow-rule">Roster</div>
+          <h1 className="text-[28px] md:text-[32px] font-semibold mt-2 text-zinc-900 tracking-tight">Clients</h1>
           <p className="text-[13.5px] text-zinc-500 mt-1.5">All your clients and contacts.</p>
         </div>
         <button className="cta-primary" onClick={() => setEditing({ __new: true })} data-testid="new-client-btn">
@@ -45,7 +45,7 @@ export default function Clients() {
           <Link
             key={c.id}
             to={`/clients/${c.id}`}
-            className="revora-card p-5 hover:border-indigo-300 hover:shadow-sm transition group block"
+            className="revora-card p-5 lift-on-hover group block"
             data-testid={`client-card-${c.id}`}
           >
             <div className="flex items-start justify-between">
@@ -53,7 +53,7 @@ export default function Clients() {
                 <div className="text-lg font-semibold text-slate-900">{c.company_name}</div>
                 <div className="text-sm text-slate-500 mt-0.5">{c.contact_name}</div>
               </div>
-              <ArrowUpRight className="w-4 h-4 text-slate-300 group-hover:text-indigo-600 transition" />
+              <ArrowUpRight className="w-4 h-4 text-slate-300 group-hover:text-zinc-900 transition" />
             </div>
             {c.industry && (
               <div className="mt-3 inline-flex items-center text-[11px] uppercase tracking-[0.16em] px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 font-semibold">

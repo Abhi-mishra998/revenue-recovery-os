@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useState, useCallback } from "react";
 import { api, setToken, getToken } from "@/lib/api";
+import { resetOnboardingCache } from "@/App";
 
 const AuthContext = createContext(null);
 
@@ -54,6 +55,7 @@ export function AuthProvider({ children }) {
     try { await api.post("/auth/logout"); } catch { /* token may already be invalid; clearing locally is enough */ }
     setToken(null);
     setUser(null);
+    resetOnboardingCache();
   };
 
   return (

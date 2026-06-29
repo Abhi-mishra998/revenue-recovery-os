@@ -1,5 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
+import { useEffect, useState } from "react";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
+import { api } from "@/lib/api";
 import { Toaster } from "sonner";
 import "@/App.css";
 
@@ -15,6 +17,8 @@ import Clients from "@/pages/Clients";
 import ClientDetail from "@/pages/ClientDetail";
 import Admin from "@/pages/Admin";
 import Settings from "@/pages/Settings";
+import Welcome from "@/pages/Welcome";
+import RevenueHealth from "@/pages/RevenueHealth";
 
 function Protected({ children }) {
   const { user, loading } = useAuth();
@@ -39,6 +43,29 @@ function PublicOnly({ children }) {
   return children;
 }
 
+// Gate every protected app route on has_data — first-time tenants land on /welcome.
+// One /onboarding/state call per session; cached in module scope so re-mounts
+// don't re-hit the API.
+let _cachedHasData = null;
+function OnboardingGuard({ children }) {
+  const [checked, setChecked] = useState(_cachedHasData !== null);
+  useEffect(() => {
+    if (_cachedHasData !== null) return;
+    api
+      .get("/onboarding/state")
+      .then((r) => {
+        _cachedHasData = !!r.data.has_data;
+      })
+      .catch(() => {
+        _cachedHasData = true; // be permissive on error — don't trap them on /welcome
+      })
+      .finally(() => setChecked(true));
+  }, []);
+  if (!checked) return null;
+  if (_cachedHasData === false) return <Navigate to="/welcome" replace />;
+  return children;
+}
+
 function AppRouter() {
   const location = useLocation();
   // Detect Emergent Google OAuth callback synchronously during render to avoid race conditions.
@@ -52,8 +79,12 @@ function AppRouter() {
       <Route path="/login" element={<PublicOnly><Login /></PublicOnly>} />
       <Route path="/register" element={<PublicOnly><Register /></PublicOnly>} />
 
-      <Route element={<Protected><Layout /></Protected>}>
+      {/* /welcome runs full-bleed (no Layout chrome) so onboarding doesn't show empty sidebar links */}
+      <Route path="/welcome" element={<Protected><Welcome /></Protected>} />
+
+      <Route element={<Protected><OnboardingGuard><Layout /></OnboardingGuard></Protected>}>
         <Route path="/" element={<Dashboard />} />
+        <Route path="/health" element={<RevenueHealth />} />
         <Route path="/proposals" element={<Proposals />} />
         <Route path="/proposals/:id" element={<ProposalDetail />} />
         <Route path="/invoices" element={<Invoices />} />
@@ -66,6 +97,11 @@ function AppRouter() {
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
+}
+
+// Reset onboarding cache on logout so a fresh login re-checks /onboarding/state.
+export function resetOnboardingCache() {
+  _cachedHasData = null;
 }
 
 export default function App() {

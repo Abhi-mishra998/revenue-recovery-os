@@ -85,9 +85,10 @@ export default function ProposalDetail() {
       <div className="revora-card p-6">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h1 className="text-[22px] md:text-[26px] font-semibold text-zinc-900 tracking-tight">{data.title}</h1>
+            <div className="eyebrow-rule mb-2">Proposal</div>
+            <h1 className="text-[26px] md:text-[32px] text-zinc-900 leading-tight font-serif-display">{data.title}</h1>
             {client && (
-              <Link to={`/clients/${client.id}`} className="text-[13px] text-zinc-700 hover:text-zinc-900 mt-1 inline-block underline-offset-4 hover:underline">
+              <Link to={`/clients/${client.id}`} className="text-[13px] text-zinc-700 hover:text-zinc-900 mt-2 inline-block underline-offset-4 hover:underline">
                 {client.company_name} · {client.contact_name}
               </Link>
             )}

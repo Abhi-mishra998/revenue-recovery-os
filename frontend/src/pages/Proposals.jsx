@@ -71,8 +71,8 @@ export default function Proposals() {
     <div className="p-6 md:p-10 max-w-[1400px] mx-auto" data-testid="proposals-page">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <div className="text-[11px] uppercase tracking-[0.08em] text-zinc-500 font-medium">Pipeline</div>
-          <h1 className="text-[28px] md:text-[32px] font-semibold mt-1 text-zinc-900 tracking-tight">Proposals</h1>
+          <div className="eyebrow-rule">Pipeline</div>
+          <h1 className="text-[28px] md:text-[32px] font-semibold mt-2 text-zinc-900 tracking-tight">Proposals</h1>
           <p className="text-[13.5px] text-zinc-500 mt-1.5">Auto status: Active ≤ 7d · Cold 8–21d · Dead 22d+ since last contact.</p>
         </div>
         <div className="flex items-center gap-2">
@@ -106,8 +106,8 @@ export default function Proposals() {
               data-testid={`filter-${s}`}
               className={`text-xs px-3 py-1.5 rounded-full border transition capitalize ${
                 statusFilter === s
-                  ? "bg-indigo-700 text-white border-indigo-700"
-                  : "bg-white border-slate-200 text-slate-700 hover:bg-indigo-50 hover:border-indigo-200 hover:text-indigo-700"
+                  ? "bg-zinc-900 text-zinc-50 border-zinc-900"
+                  : "bg-white border-zinc-200 text-zinc-700 hover:bg-zinc-50 hover:border-zinc-300 hover:text-zinc-900"
               }`}
             >
               {s}

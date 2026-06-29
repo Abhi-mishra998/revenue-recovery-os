@@ -5,6 +5,7 @@ import { inr, inrCompact } from "@/lib/format";
 import { StatusBadge } from "@/components/StatusPill";
 import { useCountUp } from "@/lib/useCountUp";
 import { TrendingDown, AlertTriangle, Wallet, Sparkles, ArrowUpRight } from "lucide-react";
+import { MorningBriefCard, WhatChangedCard, LearningCard, ImpactCard } from "@/components/Day3Cards";
 
 export default function Dashboard() {
   const [summary, setSummary] = useState(null);
@@ -15,13 +16,35 @@ export default function Dashboard() {
 
   const splitTotal = (summary?.active_inr || 0) + (summary?.cold_inr || 0) + (summary?.dead_inr || 0);
 
+  const atRiskCount =
+    (summary?.by_status?.cold || 0) + (summary?.by_status?.dead || 0);
+  const overdueCount = summary?.overdue_invoices_count || 0;
+
   return (
     <div className="p-6 md:p-10 max-w-[1300px] mx-auto" data-testid="dashboard-page">
-      <header>
-        <div className="text-[11px] uppercase tracking-[0.08em] text-zinc-500 font-medium">Overview</div>
-        <h1 className="text-[28px] md:text-[32px] font-semibold mt-1 text-zinc-900 tracking-tight">Dashboard</h1>
-        <p className="text-[13.5px] text-zinc-500 mt-1.5">A live snapshot of your revenue health.</p>
+      <header className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <div className="eyebrow-rule">Overview</div>
+          <h1 className="text-[28px] md:text-[32px] font-semibold mt-2 text-zinc-900 tracking-tight">Dashboard</h1>
+          <p className="text-[13.5px] text-zinc-500 mt-1.5">A live snapshot of your revenue health.</p>
+        </div>
+        {summary && (
+          <div className="ledger-strip" data-testid="dashboard-pulse-strip" title="Real-time signal · refreshed on load">
+            <span className="audit-fp-dot" />
+            <span className="tnum">{atRiskCount}</span> at risk
+            <span className="text-zinc-300">·</span>
+            <span className="tnum">{overdueCount}</span> overdue
+            <span className="text-zinc-300">·</span>
+            <span className="tnum">{inrCompact(summary.revenue_at_risk_inr || 0)}</span> exposed
+          </div>
+        )}
       </header>
+
+      {/* Day 3 — Morning Brief + What Changed pinned above the hero metrics */}
+      <div className="mt-6 grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <MorningBriefCard />
+        <WhatChangedCard />
+      </div>
 
       {/* Hero metrics */}
       <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-5 mt-6" data-testid="dashboard-cards">
@@ -63,6 +86,12 @@ export default function Dashboard() {
           />
         </div>
       </section>
+
+      {/* Day 3 — Impact + Learning ribbon */}
+      <div className="mt-4 grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <div className="lg:col-span-2"><ImpactCard /></div>
+        <LearningCard />
+      </div>
 
       {/* Pipeline split by auto status */}
       <section className="grid grid-cols-1 sm:grid-cols-3 gap-3 md:gap-4 mt-4" data-testid="dashboard-splits">
@@ -155,7 +184,7 @@ function Card({ label, target, sub, icon: Icon, testId, accent }) {
           </span>
         )}
       </div>
-      <div className="mt-3 text-[28px] md:text-[30px] font-semibold text-zinc-900 tracking-tight tnum" data-testid={`${testId}-value`}>
+      <div className="mt-3 text-[34px] md:text-[38px] text-zinc-900 leading-none font-serif-display tabular-nums" data-testid={`${testId}-value`}>
         {display}
       </div>
       <div className={`mt-1.5 text-[12px] ${accent === "assumption" ? "text-zinc-600 italic" : "text-zinc-500"}`} data-testid={`${testId}-sub`}>

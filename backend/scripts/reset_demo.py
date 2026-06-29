@@ -35,7 +35,8 @@ from services.seed import reset_demo_data_for_owner, seed_demo_for_owner  # noqa
 async def main():
     parser = argparse.ArgumentParser(description="Reset ByteHubble demo data.")
     parser.add_argument("--wipe-only", action="store_true", help="Delete demo data, don't reseed.")
-    parser.add_argument("--email", default=os.environ.get("ADMIN_EMAIL", "founder@bytehubble.com"))
+    default_email = (os.environ.get("ADMIN_EMAILS") or os.environ.get("ADMIN_EMAIL") or "founder@bytehubble.com").split(",")[0].strip()
+    parser.add_argument("--email", default=default_email)
     args = parser.parse_args()
 
     mongo_url = os.environ["MONGO_URL"]

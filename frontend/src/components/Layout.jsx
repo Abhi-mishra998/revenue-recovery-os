@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
-import { LayoutDashboard, FileText, Receipt, Users, LogOut, Menu, X, Command, ShieldCheck, Settings as SettingsIcon } from "lucide-react";
+import { LayoutDashboard, FileText, Receipt, Users, LogOut, Menu, X, Command, ShieldCheck, Settings as SettingsIcon, Activity } from "lucide-react";
 
 export default function Layout() {
   const { user, logout } = useAuth();
@@ -80,6 +80,7 @@ function NavItems({ onClick }) {
   return (
     <>
       <SideLink to="/" icon={LayoutDashboard} label="Dashboard" testId="nav-dashboard" end onClick={onClick} />
+      <SideLink to="/health" icon={Activity} label="Revenue Health" testId="nav-health" onClick={onClick} />
       <SideLink to="/proposals" icon={FileText} label="Proposals" testId="nav-proposals" onClick={onClick} />
       <SideLink to="/clients" icon={Users} label="Clients" testId="nav-clients" onClick={onClick} />
       <SideLink to="/invoices" icon={Receipt} label="Invoices" testId="nav-invoices" onClick={onClick} />
@@ -128,6 +129,15 @@ function UserFooter({ user, onLogout }) {
       <button className="revora-sidebar-link w-full mt-2" onClick={onLogout} data-testid="logout-btn">
         <LogOut className="w-4 h-4" /> Sign out
       </button>
+      <div className="px-2.5 mt-3 pt-2.5" style={{ borderTop: "1px dashed var(--border)" }}>
+        <div className="text-[9.5px] uppercase tracking-[0.22em] text-zinc-400 font-medium inline-flex items-center gap-1.5 mb-1.5">
+          <ShieldCheck className="w-3 h-3" strokeWidth={1.75} /> Audit chain
+        </div>
+        <div className="audit-fp" data-testid="sidebar-audit-fp" title="ed25519 fingerprint · signed audit chain">
+          <span className="audit-fp-dot" />
+          <span>5277·9747·1b6b·0905</span>
+        </div>
+      </div>
     </div>
   );
 }

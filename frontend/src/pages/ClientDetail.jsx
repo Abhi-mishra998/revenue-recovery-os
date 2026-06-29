@@ -43,8 +43,9 @@ export default function ClientDetail() {
       <div className="revora-card p-6">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h1 className="text-[22px] md:text-[26px] font-semibold text-zinc-900 tracking-tight">{client.company_name}</h1>
-            <div className="text-zinc-500 mt-0.5 text-[13.5px]">{client.contact_name}</div>
+            <div className="eyebrow-rule mb-2">Client</div>
+            <h1 className="text-[26px] md:text-[32px] text-zinc-900 leading-none font-serif-display">{client.company_name}</h1>
+            <div className="text-zinc-500 mt-2 text-[13.5px]">{client.contact_name}</div>
           </div>
           <div className="flex items-center gap-2">
             <button onClick={() => setEditing(true)} className="cta-ghost" data-testid="edit-client-detail"><Pencil className="w-3.5 h-3.5" /> Edit</button>

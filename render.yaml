@@ -1,0 +1,52 @@
+# Revora backend — Render Blueprint deploy.
+# 1. Push render.yaml to main.
+# 2. Render dashboard -> New -> Blueprint -> point at this repo.
+# 3. After first deploy, set the secrets marked `sync: false` in the Render UI.
+#    (Render won't auto-import secret values from this file — that's the point.)
+#
+# ponytail: free Standard plan + Neon free tier covers the contest window. Upgrade
+# only when a real pilot lands.
+
+services:
+  - type: web
+    name: revora-backend
+    plan: free
+    runtime: python
+    region: oregon
+    rootDir: backend
+    branch: main
+    buildCommand: pip install --upgrade pip && pip install -r requirements.txt
+    startCommand: uvicorn server:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/
+    autoDeploy: true
+    envVars:
+      - key: ENV
+        value: production
+      - key: DB_ENGINE
+        value: postgres
+      - key: POSTGRES_URL
+        sync: false  # paste Neon DSN in Render UI
+      - key: MONGO_URL
+        value: mongodb://placeholder:27017  # unused but required by server.py boot
+      - key: DB_NAME
+        value: revora_prod_unused
+      - key: JWT_SECRET
+        sync: false  # paste 64-char token in Render UI
+      - key: AUDIT_SIGNING_KEY
+        sync: false  # paste ed25519 base64 in Render UI
+      - key: ADMIN_EMAILS
+        value: abhishek.mishra@bytehubble.ai,founder@bytehubble.com
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: EMERGENT_LLM_KEY
+        sync: false  # same value as local .env
+      - key: AI_PROVIDER
+        value: emergent_gemini
+      - key: AI_MODEL
+        value: gemini-2.5-flash
+      - key: CORS_ORIGINS
+        sync: false  # paste Vercel URL after frontend deploys
+      - key: RATE_LIMIT_ENABLED
+        value: "true"
+      - key: PYTHON_VERSION
+        value: "3.12.6"
