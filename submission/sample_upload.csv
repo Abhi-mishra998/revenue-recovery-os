@@ -1,0 +1,16 @@
+Customer,Contact Person,Email,Phone,Deal Title,Deal Value,Stage,Last Contact
+Nexora Retail,Priya Sharma,priya@nexora.in,+91 98201 84421,Nexora e-commerce platform rebuild (Next.js),450000,sent,2026-06-15
+Trikon Labs,Rohan Mehta,rohan@trikonlabs.com,+91 98115 27384,ML inference pipeline (Phase 1),285000,negotiating,2026-06-19
+Sundari Studios,Anjali Iyer,anjali@sundaristudios.in,+91 99100 31102,Sundari brand identity + website,180000,sent,2026-06-16
+Patel & Associates CA,Vikram Patel,vp@patelca.in,+91 95605 88555,Internal tax-portal MVP,320000,sent,2026-05-28
+FinKart,Kunal Desai,kunal@finkart.io,+91 96320 41440,FinKart mobile app v2 — KYC + UPI flows,620000,negotiating,2026-06-27
+Bloom Wellness,Meera Krishnan,meera@bloom.health,+91 91760 71008,Bloom CRM customization + WhatsApp integration,145000,sent,2026-06-26
+Hyderabad Heritage Hotels,Arjun Reddy,arjun@hhhotels.in,+91 90080 22217,Hotel booking engine + channel manager,875000,negotiating,2026-06-12
+Kapoor Legal LLP,Neha Kapoor,neha@kapoorlegal.in,+91 98180 47266,Kapoor Legal client-portal v1,240000,sent,2026-05-30
+Pixelmoss Games,Siddharth Joshi,sid@pixelmoss.gg,+91 99023 19840,Pixelmoss web companion app,210000,sent,2026-06-17
+Sahas Mobility,Tanvi Bhatia,tanvi@sahasmobility.com,+91 70459 33221,,,,
+Mantra Media,Aditya Iyer,aditya@mantramedia.in,+91 97000 11824,Mantra analytics warehouse + dashboard,295000,negotiating,2026-06-28
+Greenly Foods,Pooja Reddy,pooja@greenly.in,+91 99650 80112,Greenly D2C site speed + checkout overhaul,155000,negotiating,2026-06-20
+,Empty Co,noname@x.com,,Mystery deal,5000,Sent,2026-06-09
+Duplicate Test,Dup,dup@x.com,,Test deal,1000,Open,2026-06-27
+Duplicate Test,Dup,dup@x.com,,Test deal,1000,Open,2026-06-27
