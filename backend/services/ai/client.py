@@ -210,12 +210,14 @@ async def _call_with_retry(p: LLMProvider, **kw) -> str:
             delay = _retry_delay(attempt)
             logger.warning(
                 "LLM call failed (attempt %d/%d), retrying in %.2fs: %s",
-                attempt, max_attempts, delay, type(e).__name__,
+                attempt,
+                max_attempts,
+                delay,
+                type(e).__name__,
             )
             await asyncio.sleep(delay)
     raise LLMProviderUnavailable(
-        f"Provider {p.name} failed {max_attempts} attempts. "
-        f"Last error: {type(last_exc).__name__}: {last_exc}"
+        f"Provider {p.name} failed {max_attempts} attempts. Last error: {type(last_exc).__name__}: {last_exc}"
     )
 
 
@@ -231,8 +233,11 @@ async def generate_text(
     """Top-level text generation with exponential-backoff retry."""
     return await _call_with_retry(
         get_provider(provider),
-        system=system, user=user, model=model,
-        max_tokens=max_tokens, session_id=session_id,
+        system=system,
+        user=user,
+        model=model,
+        max_tokens=max_tokens,
+        session_id=session_id,
     )
 
 

@@ -35,7 +35,11 @@ from services.seed import reset_demo_data_for_owner, seed_demo_for_owner  # noqa
 async def main():
     parser = argparse.ArgumentParser(description="Reset ByteHubble demo data.")
     parser.add_argument("--wipe-only", action="store_true", help="Delete demo data, don't reseed.")
-    default_email = (os.environ.get("ADMIN_EMAILS") or os.environ.get("ADMIN_EMAIL") or "founder@bytehubble.com").split(",")[0].strip()
+    default_email = (
+        (os.environ.get("ADMIN_EMAILS") or os.environ.get("ADMIN_EMAIL") or "founder@bytehubble.com")
+        .split(",")[0]
+        .strip()
+    )
     parser.add_argument("--email", default=default_email)
     args = parser.parse_args()
 

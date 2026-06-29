@@ -300,9 +300,13 @@ class TestProviderRetry:
         flaky = register_stub(_FlakyProvider(fail_times=2, then_response=_stub_payload()))
         result = _run(
             generate_proposal_followup(
-                sender_name="Rohan", recipient_contact="Priya",
-                recipient_company="FinKart", industry="Fintech",
-                title="KYC flows", value_inr=100000, days_silent=4,
+                sender_name="Rohan",
+                recipient_contact="Priya",
+                recipient_company="FinKart",
+                industry="Fintech",
+                title="KYC flows",
+                value_inr=100000,
+                days_silent=4,
                 provider="__e2e_stub__",
             )
         )
@@ -317,9 +321,13 @@ class TestProviderRetry:
         with pytest.raises(LLMProviderUnavailable):
             _run(
                 generate_proposal_followup(
-                    sender_name="Rohan", recipient_contact="Priya",
-                    recipient_company="FinKart", industry="Fintech",
-                    title="KYC flows", value_inr=100000, days_silent=4,
+                    sender_name="Rohan",
+                    recipient_contact="Priya",
+                    recipient_company="FinKart",
+                    industry="Fintech",
+                    title="KYC flows",
+                    value_inr=100000,
+                    days_silent=4,
                     provider="__e2e_stub__",
                 )
             )

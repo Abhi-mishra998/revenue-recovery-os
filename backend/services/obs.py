@@ -130,8 +130,7 @@ def init_sentry() -> bool:
         from sentry_sdk.integrations.fastapi import FastApiIntegration  # type: ignore
     except ImportError:
         logging.getLogger(__name__).warning(
-            "SENTRY_DSN set but sentry-sdk not installed — skipping Sentry init. "
-            "pip install sentry-sdk"
+            "SENTRY_DSN set but sentry-sdk not installed — skipping Sentry init. pip install sentry-sdk"
         )
         return False
     sentry_sdk.init(
