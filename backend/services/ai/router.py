@@ -48,16 +48,27 @@ class RouteSignals:
 
 
 # Default routing table. (task, tier) -> ModelChoice
+#
+# Production default is Claude Haiku 4.5 (both tiers) because:
+#   1. The emergent_* providers depend on the private `emergentintegrations`
+#      wheel which isn't installable on Render / public deploy targets, so
+#      they fail with ModuleNotFoundError at runtime there.
+#   2. Haiku is cheap (~$1/M input, $5/M output) — keeping COMPLEX on Haiku
+#      avoids accidental Sonnet 4.6 spend on the (rare) >₹50L proposal path.
+#
+# Env overrides still work — set AI_ROUTE_PROPOSAL_FOLLOWUP_{SIMPLE,COMPLEX}_
+# {PROVIDER,MODEL} on a deploy that has emergent_* available and you can flip
+# back. CI matrix uses these env overrides to test alternate providers.
 _DEFAULTS: dict[tuple[str, Tier], ModelChoice] = {
     ("proposal_followup", Tier.SIMPLE): ModelChoice(
         Tier.SIMPLE,
-        "emergent_gemini",
-        "gemini-2.5-flash",
+        "anthropic",
+        "claude-haiku-4-5-20251001",
     ),
     ("proposal_followup", Tier.COMPLEX): ModelChoice(
         Tier.COMPLEX,
-        "emergent_anthropic",
-        "claude-sonnet-4-6",
+        "anthropic",
+        "claude-haiku-4-5-20251001",
     ),
 }
 

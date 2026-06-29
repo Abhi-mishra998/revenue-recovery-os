@@ -40,17 +40,17 @@ class TestPickTier:
 
 
 class TestRoute:
-    def test_simple_default_gemini_flash(self):
+    def test_simple_default_claude_haiku(self):
         c = route(RouteSignals())
         assert c.tier is Tier.SIMPLE
-        assert c.provider == "emergent_gemini"
-        assert "flash" in c.model.lower()
+        assert c.provider == "anthropic"
+        assert "haiku" in c.model.lower()
 
-    def test_complex_default_sonnet(self):
+    def test_complex_default_claude_haiku(self):
         c = route(RouteSignals(value_inr=10_000_000))
         assert c.tier is Tier.COMPLEX
-        assert c.provider == "emergent_anthropic"
-        assert "sonnet" in c.model.lower()
+        assert c.provider == "anthropic"
+        assert "haiku" in c.model.lower()
 
     def test_ref_format(self):
         c = route(RouteSignals())
@@ -66,8 +66,8 @@ class TestEnvOverride:
         assert c.model == "gpt-4o-mini"
 
     def test_env_override_partial_provider_only(self, monkeypatch):
-        monkeypatch.setenv("AI_ROUTE_PROPOSAL_FOLLOWUP_SIMPLE_PROVIDER", "anthropic")
-        # No model override — default model is kept
+        monkeypatch.setenv("AI_ROUTE_PROPOSAL_FOLLOWUP_SIMPLE_PROVIDER", "openai")
+        # No model override — default model is kept (Day 4 default is Haiku 4.5)
         c = route(RouteSignals())
-        assert c.provider == "anthropic"
-        assert c.model == "gemini-2.5-flash"  # default for SIMPLE tier
+        assert c.provider == "openai"
+        assert c.model == "claude-haiku-4-5-20251001"
