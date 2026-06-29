@@ -156,6 +156,10 @@ class TestImpact:
             "response_rate_week": 0.0,
         }
 
+    @pytest.mark.skipif(
+        not os.environ.get("EMERGENT_LLM_KEY"),
+        reason="needs a real LLM key — generate-followup has no template fallback",
+    )
     def test_impact_increments_after_generate_followup(self):
         s, _ = _register()
         s.post(f"{API}/import/seed-demo", timeout=30)
