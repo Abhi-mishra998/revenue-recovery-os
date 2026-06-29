@@ -18,6 +18,13 @@ import requests
 BASE_URL = os.environ["REACT_APP_BACKEND_URL"].rstrip("/")
 API = f"{BASE_URL}/api"
 
+# Importer endpoints are postgres-only by design (RLS via SET LOCAL ROLE).
+# The mongo matrix exists for rollback only — skip these tests there.
+pytestmark = pytest.mark.skipif(
+    os.environ.get("DB_ENGINE", "mongo").lower() != "postgres",
+    reason="Day 1+ importer pipeline requires DB_ENGINE=postgres",
+)
+
 
 def _ago(days: int) -> str:
     return (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d")

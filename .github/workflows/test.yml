@@ -120,13 +120,15 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Apply Postgres schema (needed on both matrices — test_migration runs on mongo too)
+      - name: Apply Postgres schema (every migration in db/sql/, in order)
         env:
           PGPASSWORD: revora
         run: |
           sudo apt-get update -qq && sudo apt-get install -y postgresql-client
-          psql -h localhost -U revora -d revora -v ON_ERROR_STOP=1 \
-            -f db/sql/0001_initial.sql
+          for f in db/sql/*.sql; do
+            echo "Applying $f"
+            psql -h localhost -U revora -d revora -v ON_ERROR_STOP=1 -f "$f"
+          done
 
       - name: Start backend
         run: |

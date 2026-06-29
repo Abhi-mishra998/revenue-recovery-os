@@ -1387,29 +1387,37 @@ async def migrate_legacy_fields():
 async def seed_admin():
     """
     Ensure each configured admin (ADMIN_EMAILS, CSV) exists. Creates missing
-    users with ADMIN_PASSWORD if set. Demo data is NOT seeded on boot —
-    callers use POST /api/import/seed-demo explicitly so real-data tenants
-    stay clean.
+    users with ADMIN_PASSWORD if set. Demo data is seeded ONLY for the
+    explicit demo account (DEMO_SEED_EMAIL, default founder@bytehubble.com)
+    so real-data tenants — e.g. abhishek.mishra@bytehubble.ai — stay clean
+    per SPRINT.md §3 + the "no static numbers on the production tenant" rule.
     """
     emails = _admin_emails() or {"founder@bytehubble.com"}
+    demo_email = (os.environ.get("DEMO_SEED_EMAIL") or "founder@bytehubble.com").strip().lower()
     admin_password = os.environ.get("ADMIN_PASSWORD")
     for admin_email in emails:
-        if await users_repo.get_by_email(admin_email) is not None:
-            continue
-        if not admin_password:
-            logger.warning("ADMIN_PASSWORD not set and admin %s does not exist — skipping.", admin_email)
-            continue
-        await users_repo.insert(
-            {
-                "id": str(uuid.uuid4()),
-                "email": admin_email,
-                "name": "ByteHubble Founder",
-                "auth_provider": "email",
-                "password_hash": hash_password(admin_password),
-                "token_version": 0,
-                "created_at": now_utc().isoformat(),
-            }
-        )
+        existing = await users_repo.get_by_email(admin_email)
+        if existing is None:
+            if not admin_password:
+                logger.warning("ADMIN_PASSWORD not set and admin %s does not exist — skipping.", admin_email)
+                continue
+            owner_id = str(uuid.uuid4())
+            await users_repo.insert(
+                {
+                    "id": owner_id,
+                    "email": admin_email,
+                    "name": "ByteHubble Founder",
+                    "auth_provider": "email",
+                    "password_hash": hash_password(admin_password),
+                    "token_version": 0,
+                    "created_at": now_utc().isoformat(),
+                }
+            )
+        else:
+            owner_id = existing["id"]
+        # Only the explicit demo account gets the idempotent demo seed.
+        if admin_email == demo_email:
+            await seed_demo_for_owner(owner_id=owner_id)
 
 
 # ---------- Importer (Day 1 onboarding) ----------

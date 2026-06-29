@@ -23,6 +23,12 @@ BASE_URL = os.environ["REACT_APP_BACKEND_URL"].rstrip("/")
 API = f"{BASE_URL}/api"
 POSTGRES_URL = os.environ.get("POSTGRES_URL", "postgresql://revora:revora@localhost:5432/revora")
 
+# Revenue Health endpoints are postgres-only (snapshots + RLS).
+pytestmark = pytest.mark.skipif(
+    os.environ.get("DB_ENGINE", "mongo").lower() != "postgres",
+    reason="Day 2 revenue health requires DB_ENGINE=postgres",
+)
+
 
 def _ago(days: int) -> str:
     return (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()

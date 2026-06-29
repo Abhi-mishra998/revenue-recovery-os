@@ -18,6 +18,12 @@ import requests
 BASE_URL = os.environ["REACT_APP_BACKEND_URL"].rstrip("/")
 API = f"{BASE_URL}/api"
 
+# Day 3 endpoints (brief, learning, impact) are postgres-only.
+pytestmark = pytest.mark.skipif(
+    os.environ.get("DB_ENGINE", "mongo").lower() != "postgres",
+    reason="Day 3 brief/learning/impact requires DB_ENGINE=postgres",
+)
+
 
 def _register() -> tuple[requests.Session, dict]:
     email = f"d3_{uuid.uuid4().hex[:8]}@x.com"
