@@ -3,10 +3,10 @@ import ReactDOM from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import "@/index.css";
 import App from "@/App";
-import { initSentry } from "@/lib/sentry";
 
-// Fire-and-forget; noop unless REACT_APP_SENTRY_DSN is set.
-initSentry();
+// ponytail: Sentry hook lives at src/lib/sentry.js (opt-in). To enable in
+// prod, add @sentry/react to deps + import { initSentry } from "@/lib/sentry"
+// here + call it. Skipping for contest scope keeps the bundle smaller.
 
 const queryClient = new QueryClient({
   defaultOptions: {
