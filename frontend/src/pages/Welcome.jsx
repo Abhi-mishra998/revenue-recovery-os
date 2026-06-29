@@ -71,6 +71,14 @@ export default function Welcome() {
         headers: { "Content-Type": "multipart/form-data" },
       });
       setParsed(r.data);
+      // Smart default: if the file has money + date columns, it's almost certainly a
+      // proposals/deals export — pick that target. The /commit endpoint then lazy-creates
+      // clients via _ensure_client so a SINGLE upload populates both tables, and
+      // Revenue Health renders on the first try (instead of looking empty).
+      const ct = r.data.column_types || {};
+      const hasMoney = (ct.money || []).length > 0;
+      const hasDate = (ct.date || []).length > 0;
+      setTarget(hasMoney && hasDate ? "proposals" : "clients");
       setStep("upload"); // shows the teaser + target picker
     } catch (err) {
       toast.error(err.response?.data?.detail || "Could not parse file");
