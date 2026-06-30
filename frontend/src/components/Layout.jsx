@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
+import { preload } from "@/App";
 import { LayoutDashboard, FileText, Receipt, Users, LogOut, Menu, X, Command, ShieldCheck, Settings as SettingsIcon, Activity } from "lucide-react";
 
 export default function Layout() {
@@ -79,14 +80,14 @@ function NavItems({ onClick }) {
   const { user } = useAuth();
   return (
     <>
-      <SideLink to="/" icon={LayoutDashboard} label="Dashboard" testId="nav-dashboard" end onClick={onClick} />
-      <SideLink to="/health" icon={Activity} label="Revenue Health" testId="nav-health" onClick={onClick} />
-      <SideLink to="/proposals" icon={FileText} label="Proposals" testId="nav-proposals" onClick={onClick} />
-      <SideLink to="/clients" icon={Users} label="Clients" testId="nav-clients" onClick={onClick} />
-      <SideLink to="/invoices" icon={Receipt} label="Invoices" testId="nav-invoices" onClick={onClick} />
-      <SideLink to="/settings" icon={SettingsIcon} label="Settings" testId="nav-settings" onClick={onClick} />
+      <SideLink to="/" icon={LayoutDashboard} label="Dashboard" testId="nav-dashboard" end onClick={onClick} prefetch="dashboard" />
+      <SideLink to="/health" icon={Activity} label="Revenue Health" testId="nav-health" onClick={onClick} prefetch="health" />
+      <SideLink to="/proposals" icon={FileText} label="Proposals" testId="nav-proposals" onClick={onClick} prefetch="proposals" />
+      <SideLink to="/clients" icon={Users} label="Clients" testId="nav-clients" onClick={onClick} prefetch="clients" />
+      <SideLink to="/invoices" icon={Receipt} label="Invoices" testId="nav-invoices" onClick={onClick} prefetch="invoices" />
+      <SideLink to="/settings" icon={SettingsIcon} label="Settings" testId="nav-settings" onClick={onClick} prefetch="settings" />
       {user?.is_admin && (
-        <SideLink to="/admin" icon={ShieldCheck} label="Admin" testId="nav-admin" onClick={onClick} />
+        <SideLink to="/admin" icon={ShieldCheck} label="Admin" testId="nav-admin" onClick={onClick} prefetch="admin" />
       )}
     </>
   );
@@ -142,13 +143,19 @@ function UserFooter({ user, onLogout }) {
   );
 }
 
-function SideLink({ to, icon: Icon, label, testId, end, onClick }) {
+function SideLink({ to, icon: Icon, label, testId, end, onClick, prefetch }) {
+  // Hover/focus = intent. Kick off the route's chunk download immediately so by
+  // the time the click registers, the chunk is in cache and React.lazy resolves
+  // synchronously. Webpack dedupes repeat imports — safe to call on every enter.
+  const warm = prefetch ? () => preload[prefetch]?.() : undefined;
   return (
     <NavLink
       to={to}
       end={end}
       data-testid={testId}
       onClick={onClick}
+      onMouseEnter={warm}
+      onFocus={warm}
       className={({ isActive }) => `revora-sidebar-link ${isActive ? "active" : ""}`}
     >
       <Icon className="w-[15px] h-[15px]" strokeWidth={1.75} />

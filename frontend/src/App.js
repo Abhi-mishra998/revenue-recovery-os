@@ -17,41 +17,69 @@ import Welcome from "@/pages/Welcome";
 // caches separately, and the user only downloads what they navigate to.
 // Reduces main.js by ~225 KiB per the Lighthouse audit, which is what was
 // dominating LCP at 6.1 s.
-const AuthCallback = lazy(() => import("@/pages/AuthCallback"));
-const Dashboard = lazy(() => import("@/pages/Dashboard"));
-const Proposals = lazy(() => import("@/pages/Proposals"));
-const ProposalDetail = lazy(() => import("@/pages/ProposalDetail"));
-const Invoices = lazy(() => import("@/pages/Invoices"));
-const Clients = lazy(() => import("@/pages/Clients"));
-const ClientDetail = lazy(() => import("@/pages/ClientDetail"));
-const Admin = lazy(() => import("@/pages/Admin"));
-const Settings = lazy(() => import("@/pages/Settings"));
-const RevenueHealth = lazy(() => import("@/pages/RevenueHealth"));
+//
+// We name each loader (the `() => import(...)` arrow) so we can reuse it for
+// hover-prefetch — see `preload` below. Clicking a sidebar link with the chunk
+// already in cache feels instant (no network round-trip on nav).
+const loadAuthCallback = () => import("@/pages/AuthCallback");
+const loadDashboard = () => import("@/pages/Dashboard");
+const loadProposals = () => import("@/pages/Proposals");
+const loadProposalDetail = () => import("@/pages/ProposalDetail");
+const loadInvoices = () => import("@/pages/Invoices");
+const loadClients = () => import("@/pages/Clients");
+const loadClientDetail = () => import("@/pages/ClientDetail");
+const loadAdmin = () => import("@/pages/Admin");
+const loadSettings = () => import("@/pages/Settings");
+const loadRevenueHealth = () => import("@/pages/RevenueHealth");
 
-// Minimum-friction fallback — reserved space (no layout shift), brief spinner.
-function PageFallback() {
+const AuthCallback = lazy(loadAuthCallback);
+const Dashboard = lazy(loadDashboard);
+const Proposals = lazy(loadProposals);
+const ProposalDetail = lazy(loadProposalDetail);
+const Invoices = lazy(loadInvoices);
+const Clients = lazy(loadClients);
+const ClientDetail = lazy(loadClientDetail);
+const Admin = lazy(loadAdmin);
+const Settings = lazy(loadSettings);
+const RevenueHealth = lazy(loadRevenueHealth);
+
+// Sidebar hover-prefetch: Layout.jsx calls preload[key]?.() on mouseEnter so the
+// route chunk is downloaded before the user clicks. Idempotent — webpack dedupes
+// repeat imports of the same module.
+export const preload = {
+  dashboard: loadDashboard,
+  health: loadRevenueHealth,
+  proposals: loadProposals,
+  clients: loadClients,
+  invoices: loadInvoices,
+  settings: loadSettings,
+  admin: loadAdmin,
+};
+
+// Skeleton that mirrors the real Layout footprint (sidebar + main) so when the
+// page chunk lands and Layout swaps in, there's zero layout shift. CLS was 0.329
+// before this — almost all of it came from centered-spinner → sidebar-layout swap.
+function LayoutSkeleton({ testId = "route-loading" }) {
   return (
-    <div className="min-h-screen grid place-items-center" data-testid="route-loading">
-      <div className="flex flex-col items-center gap-3 text-zinc-500">
-        <div className="revora-spinner" />
-        <div className="text-[12px] uppercase tracking-[0.16em]">Loading</div>
-      </div>
+    <div className="min-h-screen md:flex" style={{ background: "var(--bg)" }} data-testid={testId}>
+      <aside className="hidden md:block md:w-[256px] md:shrink-0 md:min-h-screen" style={{ background: "var(--surface)", borderRight: "1px solid var(--border)" }} />
+      <main className="flex-1 min-w-0 grid place-items-center">
+        <div className="flex flex-col items-center gap-3 text-zinc-500">
+          <div className="revora-spinner" />
+          <div className="text-[12px] uppercase tracking-[0.16em]">Loading</div>
+        </div>
+      </main>
     </div>
   );
 }
 
+function PageFallback() {
+  return <LayoutSkeleton testId="route-loading" />;
+}
+
 function Protected({ children }) {
   const { user, loading } = useAuth();
-  if (loading) {
-    return (
-      <div className="min-h-screen grid place-items-center" data-testid="auth-loading">
-        <div className="flex flex-col items-center gap-3 text-zinc-500">
-          <div className="revora-spinner" />
-          <div className="text-[12px] uppercase tracking-[0.16em]">Loading workspace</div>
-        </div>
-      </div>
-    );
-  }
+  if (loading) return <LayoutSkeleton testId="auth-loading" />;
   if (!user) return <Navigate to="/login" replace />;
   return children;
 }

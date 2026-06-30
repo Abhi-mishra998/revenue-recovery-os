@@ -155,14 +155,25 @@
                     }),
                     (e.__SV = 1));
             })(document, window.posthog || []);
-            posthog.init("phc_xAvL2Iq4tFmANRE7kzbKwaSqp1HJjN7x48s3vr0CMjs", {
-                api_host: "https://us.i.posthog.com",
-                person_profiles: "identified_only", // or 'always' to create profiles for anonymous users as well,
-                session_recording: {
-                    recordCrossOriginIframes: true,
-                    capturePerformance: false,
-                },
-            });
+            // Defer PostHog init until the browser is idle so it doesn't compete
+            // with first paint / hydration. The snippet above stubs window.posthog
+            // synchronously so any early posthog.capture() calls still queue; init
+            // happens when the main thread has spare cycles. Lighthouse TBT win.
+            var __ph_init = function () {
+                posthog.init("phc_xAvL2Iq4tFmANRE7kzbKwaSqp1HJjN7x48s3vr0CMjs", {
+                    api_host: "https://us.i.posthog.com",
+                    person_profiles: "identified_only",
+                    session_recording: {
+                        recordCrossOriginIframes: true,
+                        capturePerformance: false,
+                    },
+                });
+            };
+            if ("requestIdleCallback" in window) {
+                requestIdleCallback(__ph_init, { timeout: 4000 });
+            } else {
+                setTimeout(__ph_init, 1500);
+            }
         </script>
     </body>
 </html>
