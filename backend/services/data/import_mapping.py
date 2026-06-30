@@ -50,6 +50,12 @@ TARGET_FIELDS: dict[str, list[tuple[str, bool, list[str]]]] = {
         ),
         ("email", False, ["email", "e-mail", "email id", "email address", "mail"]),
         ("phone", False, ["phone", "phone number", "mobile", "tel", "telephone", "contact number"]),
+        ("whatsapp", False, ["whatsapp", "whats app", "wa", "whatsapp number"]),
+        (
+            "preferred_channel",
+            False,
+            ["preferred channel", "channel", "contact channel", "preferred contact", "pref channel"],
+        ),
     ],
     "proposals": [
         (

@@ -15,18 +15,32 @@ import pandas as pd
 
 _VALID_STAGES = {"sent", "negotiating", "won", "lost"}
 _STAGE_ALIASES = {
+    # initial outreach
     "open": "sent",
     "new": "sent",
     "active": "sent",
+    "cold": "sent",
+    "proposal sent": "sent",
+    "proposal_sent": "sent",
+    # mid-pipeline / actively engaged
     "in progress": "negotiating",
     "in_progress": "negotiating",
     "negotiation": "negotiating",
+    "follow-up": "negotiating",
+    "follow up": "negotiating",
+    "followup": "negotiating",
+    "decision pending": "negotiating",
+    "decision_pending": "negotiating",
+    "qualified": "negotiating",
+    # outcomes
     "closed won": "won",
     "closed_won": "won",
     "closed": "won",
     "lost": "lost",
     "closed lost": "lost",
     "closed_lost": "lost",
+    "dead": "lost",
+    "dropped": "lost",
 }
 _PAID_TOKENS = {"paid", "complete", "completed", "settled"}
 

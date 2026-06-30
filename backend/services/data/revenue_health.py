@@ -69,8 +69,14 @@ _CHANNEL_ACTIONS = {
 
 
 def _action_and_minutes(memory: dict | None) -> tuple[str, int]:
-    """ponytail: 3/5/6 min stake per channel — tune from real timings."""
-    pref = (memory or {}).get("preferred_channel") or "phone"
+    """ponytail: 3/5/6 min stake per channel — tune from real timings.
+
+    Reads `channel_preference` (the actual client_memory column). The legacy
+    `preferred_channel` key is kept as fallback in case any caller still
+    passes the old shape.
+    """
+    m = memory or {}
+    pref = m.get("channel_preference") or m.get("preferred_channel") or "phone"
     verb, mins = _CHANNEL_ACTIONS.get(pref.lower(), ("Call", 5))
     return verb, mins
 
@@ -259,7 +265,7 @@ def _do_these_today(
     clients_map: dict,
     memory_map: dict,
     tenant_profile: dict | None,
-    limit: int = 3,
+    limit: int = 5,
 ) -> list[dict]:
     """Top-N actions ranked by the founder's priority. Each row has its own
     confidence chip (from predict_close_probability) and Why? evidence."""
@@ -293,8 +299,9 @@ def _do_these_today(
             f"stage = {p.get('stage', 'sent')}",
             f"₹{int(float(p['value_inr'])):,} exposed",
         ]
-        if mem and mem.get("preferred_channel"):
-            why.append(f"usually replies via {mem['preferred_channel']}")
+        _pref = (mem or {}).get("channel_preference") or (mem or {}).get("preferred_channel")
+        if _pref:
+            why.append(f"usually replies via {_pref}")
         out.append(
             {
                 "id": p["id"],

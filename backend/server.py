@@ -39,6 +39,7 @@ from services.audit import append_audit, get_public_key_fp, load_signing_key, ve
 from services.data import extract_proposal_features, predict_close_probability
 from services.data import revenue_health as rh
 from services.data.import_commit import (
+    _g,
     build_client_doc,
     build_invoice_doc,
     build_proposal_doc,
@@ -1945,6 +1946,22 @@ async def import_commit(
         raise HTTPException(400, "Empty mapping — cannot commit")
     raw_rows: list[dict] = job["raw_rows"] or []
     owner_id = user["id"]
+    headers: list[str] = job.get("headers") or []
+
+    # When target=proposals, we want a one-shot import: clients (with contact
+    # info + preferred channel) AND invoices ride along on the same commit.
+    # Derive their mappings via heuristic so the founder doesn't have to map
+    # 3 times. Falls back gracefully — if invoice columns aren't present in
+    # the CSV, the invoice insert is just skipped per-row.
+    client_mapping_derived: dict[str, str] = {}
+    invoice_mapping_derived: dict[str, str] = {}
+    if target == "proposals" and headers:
+        for x in heuristic_mapping(headers, "clients"):
+            if x.get("source_header"):
+                client_mapping_derived[x["target_field"]] = x["source_header"]
+        for x in heuristic_mapping(headers, "invoices"):
+            if x.get("source_header"):
+                invoice_mapping_derived[x["target_field"]] = x["source_header"]
 
     clients_inserted = proposals_inserted = invoices_inserted = 0
     skipped = 0
@@ -1957,22 +1974,61 @@ async def import_commit(
         for r in recs:
             client_cache[r["k"]] = r["id"]
 
-        async def _ensure_client(name: str) -> str:
+        async def _ensure_client(name: str, row: dict | None = None) -> str:
+            """Auto-create a client during a proposal/invoice commit.
+
+            When `row` is provided AND client_mapping_derived is populated (i.e.
+            target=proposals one-shot path), we pull email/phone/whatsapp from
+            the CSV row so the WhatsApp deep-link works downstream. If the row
+            has a Preferred Channel column, we also seed client_memory.
+            channel_preference — that's what drives the action verb ("WhatsApp
+            Abhishek" vs. "Call Abhishek") in Do These Today.
+            """
             key = name.lower().strip()
             if key in client_cache:
                 return client_cache[key]
             cid = str(uuid.uuid4())
             now = now_utc().isoformat()
+            email = phone = whatsapp = None
+            preferred_channel = None
+            if row is not None and client_mapping_derived:
+                email = _g(row, client_mapping_derived, "email")
+                phone = _g(row, client_mapping_derived, "phone")
+                whatsapp = _g(row, client_mapping_derived, "whatsapp")
+                preferred_channel = _g(row, client_mapping_derived, "preferred_channel")
             await conn.execute(
-                "INSERT INTO clients (id, owner_id, company_name, contact_name, language, created_at) "
-                "VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6)",
+                "INSERT INTO clients (id, owner_id, company_name, contact_name, email, phone, "
+                "whatsapp, language, created_at) "
+                "VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9)",
                 cid,
                 owner_id,
                 name,
                 "",
+                email,
+                phone,
+                whatsapp,
                 "English",
                 now,
             )
+            # Seed client_memory if we learned a channel preference. Lowercase
+            # match against the values revenue_health's _CHANNEL_ACTIONS expects
+            # — anything else gets dropped (silently safe).
+            if preferred_channel:
+                ch = preferred_channel.lower().strip()
+                if ch in ("whatsapp", "email", "phone", "call"):
+                    if ch == "call":
+                        ch = "phone"
+                    await conn.execute(
+                        "INSERT INTO client_memory (id, owner_id, client_id, channel_preference, "
+                        "channel_counts, last_outcomes, recompute_count, updated_at) "
+                        "VALUES ($1::uuid, $2::uuid, $3::uuid, $4, '{}'::jsonb, '[]'::jsonb, 0, $5) "
+                        "ON CONFLICT (owner_id, client_id) DO UPDATE SET channel_preference = EXCLUDED.channel_preference",
+                        str(uuid.uuid4()),
+                        owner_id,
+                        cid,
+                        ch,
+                        now,
+                    )
             client_cache[key] = cid
             nonlocal clients_inserted
             clients_inserted += 1
@@ -2018,7 +2074,7 @@ async def import_commit(
                 if doc is None:
                     skipped += 1
                     continue
-                doc["client_id"] = await _ensure_client(str(client_name).strip())
+                doc["client_id"] = await _ensure_client(str(client_name).strip(), row)
                 await conn.execute(
                     "INSERT INTO proposals (id, owner_id, client_id, title, value_inr, sent_date, "
                     "last_contact_date, stage, outcome_at, notes, created_at) "
@@ -2037,6 +2093,31 @@ async def import_commit(
                 )
                 proposals_inserted += 1
 
+                # One-shot import: if invoice columns are present in the same
+                # CSV row, write the invoice too. The Welcome.jsx UX only asks
+                # the founder to confirm ONE mapping (proposals) — riding the
+                # invoice in here saves a second upload/map cycle and matches
+                # how real CRM exports bundle deal + invoice on one row.
+                if invoice_mapping_derived.get("invoice_no") and invoice_mapping_derived.get("amount_inr"):
+                    inv_doc = build_invoice_doc(row, invoice_mapping_derived, owner_id, doc["client_id"])
+                    if inv_doc is not None:
+                        await conn.execute(
+                            "INSERT INTO invoices (id, owner_id, client_id, invoice_no, amount_inr, due_date, "
+                            "paid_date, issued_at, notes, created_at) "
+                            "VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6, $7, $8, $9, $10)",
+                            inv_doc["id"],
+                            inv_doc["owner_id"],
+                            inv_doc["client_id"],
+                            inv_doc["invoice_no"],
+                            inv_doc["amount_inr"],
+                            inv_doc["due_date"],
+                            inv_doc["paid_date"],
+                            inv_doc["issued_at"],
+                            inv_doc["notes"],
+                            inv_doc["created_at"],
+                        )
+                        invoices_inserted += 1
+
             elif target == "invoices":
                 client_name = row.get(mapping.get("client_name", ""), "")
                 if not client_name or not str(client_name).strip():
@@ -2046,7 +2127,7 @@ async def import_commit(
                 if doc is None:
                     skipped += 1
                     continue
-                doc["client_id"] = await _ensure_client(str(client_name).strip())
+                doc["client_id"] = await _ensure_client(str(client_name).strip(), row)
                 await conn.execute(
                     "INSERT INTO invoices (id, owner_id, client_id, invoice_no, amount_inr, due_date, "
                     "paid_date, issued_at, notes, created_at) "
