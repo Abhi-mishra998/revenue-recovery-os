@@ -27,11 +27,11 @@
   color: var(--text);
 }
 .revora-sidebar-link.active {
-  background: var(--primary);
+  background: var(--brand-ink);
   color: #FAFAFA;
 }
 .revora-sidebar-link.active:hover {
-  background: var(--primary-hover);
+  background: var(--brand-ink-hover);
   color: #FAFAFA;
 }
 
@@ -125,7 +125,7 @@
 
 /* -------- Buttons -------- */
 .cta-primary {
-  background: var(--primary);
+  background: var(--brand-ink);
   color: #FAFAFA;
   border-radius: 7px;
   padding: 0.5rem 0.85rem;
@@ -138,10 +138,10 @@
   align-items: center;
   gap: 0.4rem;
   cursor: pointer;
-  border: 1px solid var(--primary);
+  border: 1px solid var(--brand-ink);
   box-shadow: 0 1px 0 rgba(255, 255, 255, 0.06) inset, var(--shadow-xs);
 }
-.cta-primary:hover { background: var(--primary-hover); border-color: var(--primary-hover); }
+.cta-primary:hover { background: var(--brand-ink-hover); border-color: var(--brand-ink-hover); }
 .cta-primary:active { transform: translateY(1px); }
 .cta-primary:disabled { opacity: 0.5; cursor: not-allowed; }
 
@@ -177,7 +177,7 @@
   cursor: pointer;
   border: 1px solid var(--text);
 }
-.cta-accent:hover { background: var(--primary-hover); }
+.cta-accent:hover { background: var(--brand-ink-hover); }
 
 .cta-google {
   border: 1px solid var(--border);

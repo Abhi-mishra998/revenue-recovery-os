@@ -97,7 +97,7 @@ function Brand({ small }) {
     <div className="flex items-center gap-2.5" data-testid="brand-logo">
       <div
         className={`${small ? "w-7 h-7" : "w-8 h-8"} rounded-md grid place-items-center text-white brand-mark-anim`}
-        style={{ background: "var(--primary)", boxShadow: "var(--shadow-xs)" }}
+        style={{ background: "var(--brand-ink)", boxShadow: "var(--shadow-xs)" }}
       >
         <Command className={small ? "w-3.5 h-3.5" : "w-4 h-4"} strokeWidth={2.4} />
       </div>

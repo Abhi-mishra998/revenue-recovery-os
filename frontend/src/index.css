@@ -21,10 +21,13 @@
   --border-strong: #D4D4D8;
   --border-soft: #F4F4F5;
 
-  /* Primary = near-black (Vercel/Linear trust signal) */
-  --primary: #09090B;
-  --primary-hover: #18181B;
-  --primary-soft: #F4F4F5;
+  /* Brand ink = near-black (Vercel/Linear trust signal).
+     Renamed from --primary to avoid collision with shadcn's HSL --primary
+     which is `hsl(var(--primary))` — a hex value here broke every Button
+     across the app (invisible bg → white text invisible). */
+  --brand-ink: #09090B;
+  --brand-ink-hover: #18181B;
+  --brand-ink-soft: #F4F4F5;
 
   /* Accent — only for links + focus ring (Linear-ish indigo) */
   --accent: #5B5BD6;
