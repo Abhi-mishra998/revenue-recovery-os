@@ -1,7 +1,7 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": "create-react-app",
-  "buildCommand": "CI=false DISABLE_ESLINT_PLUGIN=true yarn build",
+  "buildCommand": "CI=false DISABLE_ESLINT_PLUGIN=true yarn build && node scripts/inline-css.js",
   "installCommand": "yarn install --frozen-lockfile --ignore-engines",
   "outputDirectory": "build",
   "headers": [
