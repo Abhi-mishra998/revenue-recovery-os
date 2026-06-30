@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { AnimatePresence, motion, useSpring } from "framer-motion";
 import { toast } from "sonner";
 import { ArrowRight, Command, ShieldCheck } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
@@ -9,7 +8,11 @@ import { useAuth } from "@/contexts/AuthContext";
  *  Aesthetic: "editorial fintech ledger"
  *  Deep warm-black canvas · Crimson Pro display for ₹ · Geist Mono
  *  for ledger lines + audit fingerprint · single ochre accent.
- *  No new dependencies. Scoped to this file.
+ *
+ *  framer-motion was ~80 KiB gzipped — every motion call here was a
+ *  one-frame fade-up or hover lift, all expressible in CSS. The three
+ *  utilities (.rv-fade-up, .rv-glow-drift, .rv-lift) in App.css cover
+ *  the whole file. main.js drops ~80 KiB as a result.
  * ─────────────────────────────────────────────────────────────── */
 
 const TARGET_AMOUNT = 27180000; // ₹2.71 Cr
@@ -54,14 +57,23 @@ function formatErr(detail) {
 
 /* ───────────────── sub-components ───────────────── */
 
+// requestAnimationFrame ease-out cubic — same feel as the previous useSpring
+// (which was a ~80 KiB import to animate a single number). Stops on unmount.
 function HeroCounter({ target }) {
-  const spring = useSpring(0, { stiffness: 14, damping: 22, mass: 1 });
   const [val, setVal] = useState(0);
   useEffect(() => {
-    spring.set(target);
-    const unsub = spring.on("change", (v) => setVal(v));
-    return unsub;
-  }, [target, spring]);
+    let raf;
+    const start = performance.now();
+    const duration = 1800;
+    const easeOut = (t) => 1 - Math.pow(1 - t, 3);
+    const step = (now) => {
+      const t = Math.min((now - start) / duration, 1);
+      setVal(easeOut(t) * target);
+      if (t < 1) raf = requestAnimationFrame(step);
+    };
+    raf = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf);
+  }, [target]);
   return (
     <span className="font-serif-display tabular-nums">
       ₹{formatINR(val)}
@@ -83,6 +95,11 @@ function StatusGlyph({ status }) {
   );
 }
 
+// Each row uses a unique key, so when items shift, React keeps the existing
+// rows and only mounts the new top row — only THAT row plays the fade-up.
+// We lose framer-motion's "layout" smooth-slide of the older rows when they
+// move down a slot; the browser does the move in a single frame. Acceptable
+// trade for losing 80 KiB.
 function LiveLedger() {
   const [items, setItems] = useState(() =>
     ACTIVITY.slice(0, 4).map((it, i) => ({ ...it, k: `seed-${i}` })),
@@ -98,31 +115,24 @@ function LiveLedger() {
   }, []);
   return (
     <ul className="space-y-1">
-      <AnimatePresence initial={false}>
-        {items.map((it) => (
-          <motion.li
-            layout
-            key={it.k}
-            initial={{ opacity: 0, y: -14, filter: "blur(4px)" }}
-            animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
-            exit={{ opacity: 0, y: 8, filter: "blur(2px)" }}
-            transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
-            className="flex items-center gap-3 py-2 px-2 -mx-2 rounded-md border border-transparent hover:border-zinc-800/60 hover:bg-zinc-900/40 transition-colors"
-          >
-            <StatusGlyph status={it.status} />
-            <span className="text-[13px] text-zinc-100 font-medium w-[110px] truncate">
-              {it.client}
-            </span>
-            <span className="text-[12px] text-zinc-500 truncate flex-1">{it.note}</span>
-            <span className="text-[12px] tabular-nums text-zinc-200 font-medium font-mono">
-              {inrCompact(it.amount)}
-            </span>
-            <span className="text-[10.5px] tabular-nums text-zinc-600 w-8 text-right font-mono">
-              {it.t}
-            </span>
-          </motion.li>
-        ))}
-      </AnimatePresence>
+      {items.map((it) => (
+        <li
+          key={it.k}
+          className="rv-fade-up flex items-center gap-3 py-2 px-2 -mx-2 rounded-md border border-transparent hover:border-zinc-800/60 hover:bg-zinc-900/40 transition-colors"
+        >
+          <StatusGlyph status={it.status} />
+          <span className="text-[13px] text-zinc-100 font-medium w-[110px] truncate">
+            {it.client}
+          </span>
+          <span className="text-[12px] text-zinc-500 truncate flex-1">{it.note}</span>
+          <span className="text-[12px] tabular-nums text-zinc-200 font-medium font-mono">
+            {inrCompact(it.amount)}
+          </span>
+          <span className="text-[10.5px] tabular-nums text-zinc-600 w-8 text-right font-mono">
+            {it.t}
+          </span>
+        </li>
+      ))}
     </ul>
   );
 }
@@ -220,10 +230,10 @@ export default function Login() {
           <rect width="100%" height="100%" filter="url(#rv-noise)" />
         </svg>
 
-        {/* faint warm glow — ochre, slow drift */}
-        <motion.div
+        {/* faint warm glow — ochre, slow drift via CSS keyframes */}
+        <div
           aria-hidden
-          className="absolute pointer-events-none"
+          className="absolute pointer-events-none rv-glow-drift"
           style={{
             top: "32%",
             left: "-8%",
@@ -234,8 +244,6 @@ export default function Login() {
               "radial-gradient(circle, rgba(217, 119, 6, 0.14) 0%, rgba(217,119,6,0) 60%)",
             filter: "blur(40px)",
           }}
-          animate={{ x: [0, 12, -6, 0], y: [0, -8, 6, 0] }}
-          transition={{ duration: 18, repeat: Infinity, ease: "easeInOut" }}
         />
 
         {/* hairline edge between panels */}
@@ -244,12 +252,7 @@ export default function Login() {
         {/* content frame */}
         <div className="relative z-10 flex flex-col h-full px-10 lg:px-14 py-10">
           {/* ─── header ─── */}
-          <motion.header
-            initial={{ opacity: 0, y: -6 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
-            className="flex items-center justify-between"
-          >
+          <header className="rv-fade-up flex items-center justify-between">
             <div className="flex items-center gap-2.5">
               <div className="w-8 h-8 rounded-md bg-zinc-50 text-zinc-900 grid place-items-center brand-mark-anim">
                 <Command className="w-4 h-4" strokeWidth={2.4} />
@@ -268,15 +271,11 @@ export default function Login() {
               </span>
               live
             </div>
-          </motion.header>
+          </header>
 
           {/* ─── hero ─── */}
           <div className="flex-1 flex flex-col justify-center max-w-xl mt-4">
-            <motion.div
-              initial={{ opacity: 0, y: 18 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.7, delay: 0.12, ease: [0.22, 1, 0.36, 1] }}
-            >
+            <div className="rv-fade-up" style={{ animationDelay: "120ms" }}>
               <div className="text-[10px] uppercase tracking-[0.24em] text-zinc-500 font-medium inline-flex items-center gap-2">
                 <span className="inline-block w-5 h-px bg-zinc-700" />
                 Quarter to date
@@ -292,32 +291,25 @@ export default function Login() {
                 <span className="text-zinc-200">No cold-call gymnastics.</span>{" "}
                 Just a calmer follow-up loop, signed and traceable.
               </p>
-            </motion.div>
+            </div>
 
             {/* ─── live ledger ─── */}
-            <motion.div
-              initial={{ opacity: 0, y: 18 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.6, delay: 0.36, ease: [0.22, 1, 0.36, 1] }}
-              className="mt-12"
-            >
+            <div className="rv-fade-up mt-12" style={{ animationDelay: "360ms" }}>
               <div className="text-[10px] uppercase tracking-[0.24em] text-zinc-500 font-medium inline-flex items-center gap-2 mb-4">
                 <span className="inline-block w-5 h-px bg-zinc-700" />
                 Live ledger
               </div>
               <LiveLedger />
-            </motion.div>
+            </div>
           </div>
 
           {/* ─── footer: audit chain ─── */}
-          <motion.footer
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ duration: 0.6, delay: 0.75 }}
-            className="border-t border-zinc-800/60 pt-5"
+          <footer
+            className="rv-fade-up border-t border-zinc-800/60 pt-5"
+            style={{ animationDelay: "750ms" }}
           >
             <AuditFingerprint />
-          </motion.footer>
+          </footer>
         </div>
       </aside>
 
@@ -333,12 +325,7 @@ export default function Login() {
           }}
         />
 
-        <motion.div
-          initial={{ opacity: 0, y: 14 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
-          className="relative w-full max-w-[380px]"
-        >
+        <div className="rv-fade-up relative w-full max-w-[380px]">
           {/* mobile brand */}
           <div className="md:hidden flex items-center gap-2 mb-8">
             <div className="w-7 h-7 rounded-md bg-zinc-900 text-zinc-50 grid place-items-center">
@@ -359,54 +346,36 @@ export default function Login() {
           </p>
 
           {/* google */}
-          <motion.button
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.4, delay: 0.18 }}
-            whileHover={{ y: -1 }}
-            whileTap={{ y: 0 }}
+          <button
             onClick={googleLogin}
-            className="cta-google mt-7"
+            className="cta-google rv-lift mt-7 rv-fade-up"
+            style={{ animationDelay: "180ms" }}
             data-testid="google-login-btn"
             type="button"
           >
             <GoogleIcon /> Continue with Google
-          </motion.button>
+          </button>
 
           {/* divider */}
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ delay: 0.32, duration: 0.4 }}
-            className="my-5 flex items-center gap-3 text-[10px] uppercase tracking-[0.22em] text-zinc-400"
+          <div
+            className="rv-fade-up my-5 flex items-center gap-3 text-[10px] uppercase tracking-[0.22em] text-zinc-400"
+            style={{ animationDelay: "320ms" }}
           >
             <div className="flex-1 h-px bg-zinc-200" />
             or
             <div className="flex-1 h-px bg-zinc-200" />
-          </motion.div>
+          </div>
 
           {/* form */}
-          <motion.form
-            onSubmit={submit}
-            data-testid="login-form"
-            initial="hidden"
-            animate="show"
-            variants={{
-              hidden: {},
-              show: { transition: { staggerChildren: 0.07, delayChildren: 0.34 } },
-            }}
-          >
+          <form onSubmit={submit} data-testid="login-form">
             {[
-              { label: "Email",    type: "email",    value: email,    onChange: setEmail,    test: "login-email"    },
-              { label: "Password", type: "password", value: password, onChange: setPassword, test: "login-password" },
+              { label: "Email",    type: "email",    value: email,    onChange: setEmail,    test: "login-email",    delay: 340 },
+              { label: "Password", type: "password", value: password, onChange: setPassword, test: "login-password", delay: 410 },
             ].map((f) => (
-              <motion.div
+              <div
                 key={f.label}
-                variants={{
-                  hidden: { opacity: 0, y: 6 },
-                  show: { opacity: 1, y: 0, transition: { duration: 0.36, ease: [0.22, 1, 0.36, 1] } },
-                }}
-                className="mb-3.5"
+                className="rv-fade-up mb-3.5"
+                style={{ animationDelay: `${f.delay}ms` }}
               >
                 <label className="field-label">{f.label}</label>
                 <input
@@ -418,20 +387,14 @@ export default function Login() {
                   required
                   autoComplete={f.type === "email" ? "email" : "current-password"}
                 />
-              </motion.div>
+              </div>
             ))}
 
-            <motion.button
-              variants={{
-                hidden: { opacity: 0, y: 6 },
-                show: { opacity: 1, y: 0, transition: { duration: 0.36, ease: [0.22, 1, 0.36, 1] } },
-              }}
-              whileHover={{ y: -1, boxShadow: "0 12px 30px rgba(9,9,11,0.18)" }}
-              whileTap={{ y: 0 }}
+            <button
+              className="cta-primary rv-lift rv-fade-up w-full justify-center group"
+              style={{ padding: "0.78rem 1rem", fontSize: 14, marginTop: 8, animationDelay: "480ms" }}
               data-testid="login-submit"
               disabled={loading}
-              className="cta-primary w-full justify-center group"
-              style={{ padding: "0.78rem 1rem", fontSize: 14, marginTop: 8 }}
               type="submit"
             >
               {loading ? (
@@ -448,14 +411,12 @@ export default function Login() {
                   />
                 </span>
               )}
-            </motion.button>
-          </motion.form>
+            </button>
+          </form>
 
-          <motion.p
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ delay: 0.6, duration: 0.4 }}
-            className="text-[12.5px] text-zinc-500 mt-6 text-center"
+          <p
+            className="rv-fade-up text-[12.5px] text-zinc-500 mt-6 text-center"
+            style={{ animationDelay: "600ms" }}
           >
             New here?{" "}
             <Link
@@ -465,15 +426,12 @@ export default function Login() {
             >
               Create an account
             </Link>
-          </motion.p>
+          </p>
 
           {/* demo creds tile */}
-          <motion.div
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.72, duration: 0.4 }}
-            className="mt-7 p-3.5 rounded-md text-[11.5px] text-zinc-600"
-            style={{ background: "var(--surface-2)", border: "1px solid var(--border)" }}
+          <div
+            className="rv-fade-up mt-7 p-3.5 rounded-md text-[11.5px] text-zinc-600"
+            style={{ background: "var(--surface-2)", border: "1px solid var(--border)", animationDelay: "720ms" }}
           >
             <div className="flex items-center gap-1.5 text-[9.5px] uppercase tracking-[0.22em] text-zinc-500 mb-1.5 font-medium">
               <span className="w-1 h-1 rounded-full bg-amber-500" />
@@ -482,8 +440,8 @@ export default function Login() {
             Credentials are pre-filled. Click{" "}
             <span className="font-medium text-zinc-800">Sign in</span> to enter the seeded
             ByteHubble pilot.
-          </motion.div>
-        </motion.div>
+          </div>
+        </div>
       </main>
     </div>
   );
