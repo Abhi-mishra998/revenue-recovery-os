@@ -97,7 +97,11 @@ TARGET_FIELDS: dict[str, list[tuple[str, bool, list[str]]]] = {
         ),
         ("amount_inr", True, ["amount", "value", "total", "₹", "inr", "billed"]),
         ("due_date", True, ["due", "due date", "deadline", "payment due", "pay by"]),
-        ("status", False, ["status", "state", "paid", "payment status"]),
+        (
+            "status",
+            False,
+            ["invoice status", "bill status", "payment status", "status", "state", "paid"],
+        ),
     ],
 }
 

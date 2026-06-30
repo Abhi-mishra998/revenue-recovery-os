@@ -1971,11 +1971,15 @@ async def import_commit(
         stage_header = mapping.get("stage")
         for h in headers:
             h_norm = h.lower().strip()
-            if h != stage_header and ("status" in h_norm or "outcome" in h_norm):
-                # avoid invoice status (already mapped to invoices.status)
-                if h != invoice_mapping_derived.get("status"):
-                    status_override_header = h
-                    break
+            # Skip the mapped Stage column and any invoice/bill-flavored status
+            # (those describe payment state, not deal outcome).
+            if h == stage_header:
+                continue
+            if "invoice" in h_norm or "bill" in h_norm or "payment" in h_norm:
+                continue
+            if "status" in h_norm or "outcome" in h_norm:
+                status_override_header = h
+                break
 
     clients_inserted = proposals_inserted = invoices_inserted = 0
     skipped = 0
