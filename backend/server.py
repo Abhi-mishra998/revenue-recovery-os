@@ -1955,6 +1955,12 @@ async def import_commit(
     # the CSV, the invoice insert is just skipped per-row.
     client_mapping_derived: dict[str, str] = {}
     invoice_mapping_derived: dict[str, str] = {}
+    # Outcome-override header: a second "status"-like column distinct from the
+    # mapped stage column. Real CRMs often carry BOTH a pipeline-phase column
+    # ("Follow-up" / "Decision Pending") AND a deal-outcome column ("Won" /
+    # "Lost" / "Dead"). The heuristic picks one — we read the other for any
+    # row where the outcome is terminal and override stage there.
+    status_override_header: Optional[str] = None
     if target == "proposals" and headers:
         for x in heuristic_mapping(headers, "clients"):
             if x.get("source_header"):
@@ -1962,6 +1968,14 @@ async def import_commit(
         for x in heuristic_mapping(headers, "invoices"):
             if x.get("source_header"):
                 invoice_mapping_derived[x["target_field"]] = x["source_header"]
+        stage_header = mapping.get("stage")
+        for h in headers:
+            h_norm = h.lower().strip()
+            if h != stage_header and ("status" in h_norm or "outcome" in h_norm):
+                # avoid invoice status (already mapped to invoices.status)
+                if h != invoice_mapping_derived.get("status"):
+                    status_override_header = h
+                    break
 
     clients_inserted = proposals_inserted = invoices_inserted = 0
     skipped = 0
@@ -1996,6 +2010,12 @@ async def import_commit(
                 phone = _g(row, client_mapping_derived, "phone")
                 whatsapp = _g(row, client_mapping_derived, "whatsapp")
                 preferred_channel = _g(row, client_mapping_derived, "preferred_channel")
+            # Mirror phone into whatsapp when CSV has no separate WhatsApp
+            # column (the common case for Indian SMB CRMs — Phone IS WhatsApp).
+            # The wa.me frontend logic prefers whatsapp; populating it directly
+            # avoids relying on the `whatsapp || phone` fallback at click time.
+            if not whatsapp and phone:
+                whatsapp = phone
             await conn.execute(
                 "INSERT INTO clients (id, owner_id, company_name, contact_name, email, phone, "
                 "whatsapp, language, created_at) "
@@ -2074,6 +2094,18 @@ async def import_commit(
                 if doc is None:
                     skipped += 1
                     continue
+                # Terminal outcome from the second status column (e.g. "Won")
+                # wins over pipeline phase (e.g. "Decision Pending"). CRM exports
+                # routinely keep stale phase values on deals that have already
+                # closed — we trust the outcome column when it's decisive.
+                if status_override_header:
+                    raw_outcome = row.get(status_override_header)
+                    if raw_outcome:
+                        oc = str(raw_outcome).lower().strip()
+                        if oc in ("won", "closed won", "closed_won"):
+                            doc["stage"] = "won"
+                        elif oc in ("lost", "closed lost", "closed_lost", "dead", "dropped"):
+                            doc["stage"] = "lost"
                 doc["client_id"] = await _ensure_client(str(client_name).strip(), row)
                 await conn.execute(
                     "INSERT INTO proposals (id, owner_id, client_id, title, value_inr, sent_date, "
