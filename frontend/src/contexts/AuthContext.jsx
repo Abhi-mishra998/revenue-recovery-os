@@ -6,7 +6,11 @@ const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
-  const [loading, setLoading] = useState(true);
+  // Initialize loading from token presence. No token = no /auth/me call = no wait =
+  // PublicOnly can render Login on the FIRST paint instead of after the auth
+  // check round-trip. Lighthouse LCP was 5.0 s because the form was gated on the
+  // first /auth/me even for cold visitors who had nothing to check.
+  const [loading, setLoading] = useState(() => !!getToken());
 
   const checkAuth = useCallback(async () => {
     const t = getToken();
