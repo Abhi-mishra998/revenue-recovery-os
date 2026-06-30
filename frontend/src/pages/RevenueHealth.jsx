@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { api } from "@/lib/api";
 import { inr, inrCompact } from "@/lib/format";
 import { Button } from "@/components/ui/button";
@@ -10,7 +11,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { toast } from "sonner";
-import { Download, ChevronRight, ArrowUp, ArrowDown, Minus, Sparkles, Loader2 } from "lucide-react";
+import { Download, ChevronRight, ArrowUp, ArrowDown, Minus, Sparkles, Loader2, ArrowRight, Upload } from "lucide-react";
 import ThumbsFeedback from "@/components/ThumbsFeedback";
 
 const STATUS_TONE = {
@@ -152,8 +153,15 @@ function DoTheseTodayList({ rows, totalMinutes, onPersonalize, showPersonalize }
     return (
       <section className="rounded-xl border bg-white p-6 shadow-sm">
         <div className="text-[12px] uppercase tracking-[0.16em] text-zinc-500">Do These Today</div>
-        <div className="mt-3 text-[13px] text-zinc-500" data-testid="do-today-empty">
-          No open proposals — upload more data or wait until your next follow-ups.
+        <div className="mt-3 text-[13.5px] text-zinc-700" data-testid="do-today-empty">
+          No open proposals yet. Once you import your CRM file with deal values, Revora will rank the top three actions for the day.
+        </div>
+        <div className="mt-4">
+          <Link to="/welcome" data-testid="do-today-upload-cta">
+            <Button variant="outline" size="sm">
+              <Upload className="size-4" aria-hidden="true" /> Upload your CSV
+            </Button>
+          </Link>
         </div>
       </section>
     );
@@ -168,23 +176,29 @@ function DoTheseTodayList({ rows, totalMinutes, onPersonalize, showPersonalize }
         {rows.map((r, i) => (
           <li
             key={r.id}
-            className="flex flex-col md:flex-row md:items-center gap-2 p-3"
+            className="flex flex-col md:flex-row md:items-center gap-3 p-3 hover:bg-zinc-50 transition-colors"
             data-testid={`do-row-${i}`}
           >
-            <div className="md:w-2/3">
-              <div className="flex items-center gap-2">
+            <div className="md:flex-1 min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
                 <RiskBadge status={r.status} label={`Step ${i + 1}`} />
                 <span className="font-semibold">{r.action}</span>
-                <span className="text-[12.5px] text-zinc-500">· {r.estimated_minutes} min</span>
+                <span className="text-[12.5px] text-zinc-500">· {r.estimated_minutes} min · recover {inr(r.value_inr)}</span>
               </div>
-              <div className="mt-1 text-[12.5px] text-zinc-500">recover {inr(r.value_inr)}</div>
-              <div className="mt-2 flex items-center gap-3">
+              <div className="mt-2 flex flex-wrap items-center gap-3">
                 <ConfidenceChip confidence={r.confidence} />
                 <ThumbsFeedback recommendationId={r.id} />
               </div>
               <div className="mt-2">
                 <WhyChevron why={r.why} />
               </div>
+            </div>
+            <div className="md:ml-auto shrink-0">
+              <Link to={`/proposals/${r.id}`} data-testid={`do-row-${i}-draft`}>
+                <Button size="sm">
+                  Draft follow-up <ArrowRight className="size-3.5" aria-hidden="true" />
+                </Button>
+              </Link>
             </div>
           </li>
         ))}
