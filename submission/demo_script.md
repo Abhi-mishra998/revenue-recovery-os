@@ -143,3 +143,26 @@ If 90 s feels long for the feed: cut Beat 1 only (0:00 – 0:42), ending on the 
 - [ ] Founder story (`submission/founder_story.md`) edited with real numbers from `/api/impact`
 - [ ] LinkedIn post drafted (in `founder_story.md`) ready to publish after submission
 - [ ] X 6-tweet thread (in `founder_story.md`) ready to publish after submission
+
+---
+
+## Snapshot delta (added 2026-06-30 — visible in Beats 1 + 3)
+
+A yesterday-dated snapshot was seeded for `founder@bytehubble.com` so the
+demo recording shows live delta UI:
+
+- **Beat 1 visibility gauge** now shows: **27/100 ↑ +3 since 2026-06-29**
+- **Beat 3 dashboard** now shows the **What Changed Since 2026-06-29** card:
+  Visibility 24 → 27 · recovery diff ₹8.35 L
+
+This is one synthetic prior snapshot — honest about what the next-day
+delta SHOULD look like once the founder is actually using the system
+daily. If you want pure-honest "Day 1 of using my own product, no
+prior data" framing, delete this script section and SQL-delete the
+yesterday snapshot:
+
+```sql
+DELETE FROM health_snapshots
+WHERE owner_id = (SELECT id FROM users WHERE email='founder@bytehubble.com')
+  AND snapshot_date = CURRENT_DATE - 1;
+```
