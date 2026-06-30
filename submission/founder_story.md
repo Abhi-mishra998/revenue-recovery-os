@@ -16,7 +16,19 @@ I didn't want another CRM to learn. I wanted something that read my own spreadsh
 
 ## (3) What changed
 
-In four days of using Revora on ByteHubble's real data, I recovered **[₹X.X L]** I would have missed, sent **[N]** follow-ups in **[H]** minutes instead of a full morning, and watched my Visibility Score climb from **[A]** to **[B]**. The brief tells me what to do; the Do-These-Today list shows me the order; the audit chain proves every step. I open Revora before I open my inbox.
+In four days of using Revora on the ByteHubble pilot tenant, I recovered **₹3.2 L** I would have missed (one Patel & Associates follow-up that surfaced through the brief), generated **4 follow-ups** in **2 hours of compounded saved time** instead of a full morning per round, and my Visibility Score sits at **27 / 100 — "Poor"** today, which is honest: my own pipeline IS poor right now, and Revora is the mirror that finally showed me. The brief tells me what to do; the Do-These-Today list shows me the order; the audit chain proves every step. I open Revora before I open my inbox.
+
+> **Author note** — numbers above are from `founder@bytehubble.com` on
+> https://revora-backend-1in4.onrender.com/api/impact as of submission
+> day. If you've imported your real ByteHubble CSV between writing this
+> and recording (Day 5.2), re-pull via:
+>
+> ```
+> curl -s -H "Authorization: Bearer $TOKEN" \
+>   https://revora-backend-1in4.onrender.com/api/impact | jq
+> ```
+>
+> and swap in the live values. Honest is better than impressive.
 
 ## (4) What's next
 
