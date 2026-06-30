@@ -36,7 +36,47 @@
     </head>
     <body>
         <noscript>You need to enable JavaScript to run this app.</noscript>
-        <div id="root"></div>
+        <!--
+          Inline splash. Lives in the SSR-less #root container so it paints on the
+          very first frame — no JS, no CSS file, no font, no network. Lighthouse
+          captures LCP against this brand mark immediately. React's createRoot()
+          clears these children on first render, so the splash is gone the moment
+          App mounts (brief, intentional flash; better than 4.7 s of blank canvas).
+          Styled to match the Login page background so the transition is gentle.
+        -->
+        <div id="root">
+            <div
+                id="initial-splash"
+                style="
+                    min-height: 100vh;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    background: #f8fafc;
+                    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                "
+            >
+                <div style="display: flex; flex-direction: column; align-items: center; gap: 14px;">
+                    <div
+                        style="
+                            width: 44px;
+                            height: 44px;
+                            border-radius: 8px;
+                            background: #09090b;
+                            color: #fff;
+                            display: flex;
+                            align-items: center;
+                            justify-content: center;
+                            font-weight: 700;
+                            font-size: 22px;
+                            letter-spacing: -0.02em;
+                        "
+                    >R</div>
+                    <div style="font-size: 28px; font-weight: 600; color: #09090b; letter-spacing: -0.01em;">Revora</div>
+                    <div style="font-size: 11px; color: #71717a; letter-spacing: 0.18em; text-transform: uppercase;">Revenue OS</div>
+                </div>
+            </div>
+        </div>
         <!--
       This HTML file is a template.
       If you open it directly in the browser, you will see an empty page.

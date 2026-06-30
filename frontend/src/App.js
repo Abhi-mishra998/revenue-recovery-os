@@ -2,25 +2,22 @@ import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-route
 import { lazy, Suspense, useEffect, useState } from "react";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import { api } from "@/lib/api";
-import { Toaster } from "sonner";
 import "@/App.css";
 
-// Eager-load the first-paint critical surface — auth, onboarding, layout chrome.
-// These are the pages a cold visitor lands on. Keeping them in main.js means
-// they render without a network round-trip for a chunk.
-import Layout from "@/components/Layout";
-import Login from "@/pages/Login";
-import Register from "@/pages/Register";
-import Welcome from "@/pages/Welcome";
-
-// Lazy-load everything else. Each page becomes its own chunk that Vercel/CDN
-// caches separately, and the user only downloads what they navigate to.
-// Reduces main.js by ~225 KiB per the Lighthouse audit, which is what was
-// dominating LCP at 6.1 s.
+// Lazy-load every route, including the first-paint surface (Login, Register,
+// Welcome, Layout). Login pulls in framer-motion (~80 KiB) — pinning it in
+// main.js was inflating the bundle to 199 KiB and dominating LCP on slow 4G.
+// The inline brand splash in public/index.html paints the LCP element before
+// any JS runs, so by the time the Login chunk lands the splash is replaced
+// cleanly. main.js drops to framework-only (~120 KiB).
 //
-// We name each loader (the `() => import(...)` arrow) so we can reuse it for
-// hover-prefetch — see `preload` below. Clicking a sidebar link with the chunk
-// already in cache feels instant (no network round-trip on nav).
+// Each loader is named so we can reuse it for hover-prefetch — see `preload`
+// below. Clicking a sidebar link with the chunk already in cache feels
+// instant (no network round-trip on nav).
+const loadLogin = () => import("@/pages/Login");
+const loadRegister = () => import("@/pages/Register");
+const loadWelcome = () => import("@/pages/Welcome");
+const loadLayout = () => import("@/components/Layout");
 const loadAuthCallback = () => import("@/pages/AuthCallback");
 const loadDashboard = () => import("@/pages/Dashboard");
 const loadProposals = () => import("@/pages/Proposals");
@@ -31,7 +28,12 @@ const loadClientDetail = () => import("@/pages/ClientDetail");
 const loadAdmin = () => import("@/pages/Admin");
 const loadSettings = () => import("@/pages/Settings");
 const loadRevenueHealth = () => import("@/pages/RevenueHealth");
+const loadToaster = () => import("sonner").then((m) => ({ default: m.Toaster }));
 
+const Login = lazy(loadLogin);
+const Register = lazy(loadRegister);
+const Welcome = lazy(loadWelcome);
+const Layout = lazy(loadLayout);
 const AuthCallback = lazy(loadAuthCallback);
 const Dashboard = lazy(loadDashboard);
 const Proposals = lazy(loadProposals);
@@ -42,6 +44,7 @@ const ClientDetail = lazy(loadClientDetail);
 const Admin = lazy(loadAdmin);
 const Settings = lazy(loadSettings);
 const RevenueHealth = lazy(loadRevenueHealth);
+const LazyToaster = lazy(loadToaster);
 
 // Sidebar hover-prefetch: Layout.jsx calls preload[key]?.() on mouseEnter so the
 // route chunk is downloaded before the user clicks. Idempotent — webpack dedupes
@@ -162,7 +165,12 @@ export default function App() {
   return (
     <AuthProvider>
       <BrowserRouter>
-        <Toaster richColors position="top-right" />
+        {/* Toaster lazy-loaded so sonner (~10 KiB) doesn't pin in main.js. A
+            null fallback is fine — no toast fires before user interaction, and
+            the chunk is well in flight by the time anyone clicks anything. */}
+        <Suspense fallback={null}>
+          <LazyToaster richColors position="top-right" />
+        </Suspense>
         <AppRouter />
       </BrowserRouter>
     </AuthProvider>
