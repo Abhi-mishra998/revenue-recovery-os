@@ -4,20 +4,22 @@ import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import { api } from "@/lib/api";
 import "@/App.css";
 
-// Lazy-load every route, including the first-paint surface (Login, Register,
-// Welcome, Layout). Login pulls in framer-motion (~80 KiB) — pinning it in
-// main.js was inflating the bundle to 199 KiB and dominating LCP on slow 4G.
-// The inline brand splash in public/index.html paints the LCP element before
-// any JS runs, so by the time the Login chunk lands the splash is replaced
-// cleanly. main.js drops to framework-only (~120 KiB).
+// Eager-load the first-paint critical surface — auth, onboarding, layout chrome.
+// Lazy-loading Login moved framer-motion out of main.js but inflated LCP (chunk
+// download added latency) and caused CLS (splash → Login swap). Lighthouse
+// regression confirmed: 79 → 54. Keeping the entry routes eager — the framer
+// cost is paid by Login itself only.
+import Layout from "@/components/Layout";
+import Login from "@/pages/Login";
+import Register from "@/pages/Register";
+import Welcome from "@/pages/Welcome";
+
+// Lazy-load everything else. Each page becomes its own chunk that Vercel/CDN
+// caches separately, and the user only downloads what they navigate to.
 //
-// Each loader is named so we can reuse it for hover-prefetch — see `preload`
-// below. Clicking a sidebar link with the chunk already in cache feels
-// instant (no network round-trip on nav).
-const loadLogin = () => import("@/pages/Login");
-const loadRegister = () => import("@/pages/Register");
-const loadWelcome = () => import("@/pages/Welcome");
-const loadLayout = () => import("@/components/Layout");
+// We name each loader (the `() => import(...)` arrow) so we can reuse it for
+// hover-prefetch — see `preload` below. Clicking a sidebar link with the chunk
+// already in cache feels instant (no network round-trip on nav).
 const loadAuthCallback = () => import("@/pages/AuthCallback");
 const loadDashboard = () => import("@/pages/Dashboard");
 const loadProposals = () => import("@/pages/Proposals");
@@ -30,10 +32,6 @@ const loadSettings = () => import("@/pages/Settings");
 const loadRevenueHealth = () => import("@/pages/RevenueHealth");
 const loadToaster = () => import("sonner").then((m) => ({ default: m.Toaster }));
 
-const Login = lazy(loadLogin);
-const Register = lazy(loadRegister);
-const Welcome = lazy(loadWelcome);
-const Layout = lazy(loadLayout);
 const AuthCallback = lazy(loadAuthCallback);
 const Dashboard = lazy(loadDashboard);
 const Proposals = lazy(loadProposals);
