@@ -141,68 +141,81 @@ export default function Welcome() {
 
   // --------- Step renderers ---------
   if (step === "choose") {
+    const cards = [
+      {
+        key: "csv",
+        onClick: pickCsv,
+        testId: "welcome-upload-csv",
+        icon: UploadCloud,
+        iconBg: "bg-zinc-900",
+        iconColor: "text-white",
+        title: "Upload CSV",
+        sub: ".csv export from any CRM, sheet, or invoice tool.",
+        cta: "Choose file",
+      },
+      {
+        key: "xlsx",
+        onClick: pickCsv,
+        testId: "welcome-upload-xlsx",
+        icon: FileSpreadsheet,
+        iconBg: "bg-emerald-600",
+        iconColor: "text-white",
+        title: "Upload Excel",
+        sub: ".xlsx export — single sheet only for now.",
+        cta: "Choose file",
+      },
+      {
+        key: "demo",
+        onClick: seedDemo,
+        testId: "welcome-use-demo",
+        icon: Database,
+        iconBg: "bg-indigo-600",
+        iconColor: "text-white",
+        title: "Use Demo Data",
+        sub: "Realistic clients, proposals, invoices — perfect for a 90-second tour.",
+        cta: "Load demo",
+      },
+    ];
+
     return (
-      <div className="min-h-screen grid place-items-center p-6 bg-zinc-50" data-testid="welcome-page">
-        <div className="w-full max-w-3xl">
-          <div className="text-center mb-8">
-            <div className="text-xs uppercase tracking-[0.16em] text-zinc-500">Welcome to Revora</div>
-            <h1 className="text-[28px] md:text-[32px] font-semibold mt-2 tracking-tight">
+      <div className="min-h-screen p-6 bg-gradient-to-b from-zinc-50 to-zinc-100" data-testid="welcome-page">
+        <div className="w-full max-w-4xl mx-auto pt-12 md:pt-20">
+          <div className="text-center mb-10">
+            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white border border-zinc-200 text-[11px] uppercase tracking-[0.16em] text-zinc-600 mb-5">
+              <Sparkles className="size-3" aria-hidden="true" /> Welcome to Revora
+            </div>
+            <h1 className="text-[32px] md:text-[40px] font-semibold tracking-tight text-zinc-900">
               Find the revenue your spreadsheet is hiding.
             </h1>
-            <p className="text-[13.5px] text-zinc-500 mt-2">
-              Upload your CRM data — Revora will surface what's at risk, why, and what to do today.
+            <p className="text-[15px] text-zinc-600 mt-3 max-w-xl mx-auto">
+              Drop your CRM data. In under three seconds, Revora shows what's at risk, why, and the three actions to take today.
             </p>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <button
-              type="button"
-              onClick={pickCsv}
-              className="group rounded-xl border bg-white p-6 text-left hover:border-zinc-400 hover:shadow-sm transition"
-              data-testid="welcome-upload-csv"
-            >
-              <UploadCloud className="size-7 text-zinc-700" />
-              <div className="font-semibold mt-4">Upload CSV</div>
-              <div className="text-[12.5px] text-zinc-500 mt-1">
-                .csv export from any CRM, sheet, or invoice tool.
-              </div>
-              <span className="inline-flex items-center mt-4 text-[12.5px] text-zinc-700 group-hover:underline">
-                Choose file <ArrowRight className="size-3.5 ml-1" />
-              </span>
-            </button>
-
-            <button
-              type="button"
-              onClick={pickCsv}
-              className="group rounded-xl border bg-white p-6 text-left hover:border-zinc-400 hover:shadow-sm transition"
-              data-testid="welcome-upload-xlsx"
-            >
-              <FileSpreadsheet className="size-7 text-zinc-700" />
-              <div className="font-semibold mt-4">Upload Excel</div>
-              <div className="text-[12.5px] text-zinc-500 mt-1">
-                .xlsx export — single sheet only for now.
-              </div>
-              <span className="inline-flex items-center mt-4 text-[12.5px] text-zinc-700 group-hover:underline">
-                Choose file <ArrowRight className="size-3.5 ml-1" />
-              </span>
-            </button>
-
-            <button
-              type="button"
-              onClick={seedDemo}
-              disabled={submitting}
-              className="group rounded-xl border bg-white p-6 text-left hover:border-zinc-400 hover:shadow-sm transition disabled:opacity-60"
-              data-testid="welcome-use-demo"
-            >
-              <Database className="size-7 text-zinc-700" />
-              <div className="font-semibold mt-4">Use Demo Data</div>
-              <div className="text-[12.5px] text-zinc-500 mt-1">
-                Realistic clients, proposals, and invoices — perfect for a tour.
-              </div>
-              <span className="inline-flex items-center mt-4 text-[12.5px] text-zinc-700 group-hover:underline">
-                Load demo <ArrowRight className="size-3.5 ml-1" />
-              </span>
-            </button>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+            {cards.map((c) => {
+              const Icon = c.icon;
+              return (
+                <button
+                  key={c.key}
+                  type="button"
+                  onClick={c.onClick}
+                  disabled={submitting}
+                  className="group relative rounded-2xl border border-zinc-200 bg-white p-7 text-left shadow-sm hover:border-zinc-900 hover:shadow-xl hover:-translate-y-1 active:translate-y-0 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-zinc-900 focus:ring-offset-2"
+                  data-testid={c.testId}
+                  aria-label={c.title}
+                >
+                  <div className={`inline-flex items-center justify-center w-12 h-12 rounded-xl ${c.iconBg} ${c.iconColor} shadow-md group-hover:scale-105 transition-transform`}>
+                    <Icon className="size-6" aria-hidden="true" />
+                  </div>
+                  <div className="font-semibold mt-5 text-[17px] text-zinc-900">{c.title}</div>
+                  <div className="text-[13px] text-zinc-600 mt-1.5 leading-relaxed">{c.sub}</div>
+                  <span className="inline-flex items-center mt-6 text-[13px] font-medium text-zinc-900 group-hover:gap-2 transition-all">
+                    {c.cta} <ArrowRight className="size-4 ml-1 group-hover:translate-x-0.5 transition-transform" aria-hidden="true" />
+                  </span>
+                </button>
+              );
+            })}
           </div>
 
           <input
@@ -274,9 +287,15 @@ export default function Welcome() {
                   </Select>
                 </div>
               </div>
-              <Button onClick={runMapper} disabled={submitting} data-testid="welcome-run-mapper">
-                {submitting ? <Loader2 className="size-4 animate-spin" /> : <>Continue <ArrowRight className="size-4" /></>}
-              </Button>
+              <button
+                type="button"
+                onClick={runMapper}
+                disabled={submitting}
+                data-testid="welcome-run-mapper"
+                className="inline-flex items-center justify-center gap-2 rounded-md bg-zinc-900 hover:bg-zinc-800 active:bg-black text-white font-medium px-5 py-2.5 text-sm shadow-sm hover:shadow disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-zinc-900 focus:ring-offset-2 transition-colors"
+              >
+                {submitting ? <Loader2 className="size-4 animate-spin" aria-hidden="true" /> : <>Continue <ArrowRight className="size-4" aria-hidden="true" /></>}
+              </button>
             </div>
           </div>
         </div>
@@ -344,9 +363,15 @@ export default function Welcome() {
               >
                 ← Back
               </button>
-              <Button onClick={commitImport} disabled={submitting} data-testid="welcome-commit">
-                {submitting ? <Loader2 className="size-4 animate-spin" /> : <>Import {parsed.data_quality.rows} rows</>}
-              </Button>
+              <button
+                type="button"
+                onClick={commitImport}
+                disabled={submitting}
+                data-testid="welcome-commit"
+                className="inline-flex items-center justify-center gap-2 rounded-md bg-zinc-900 hover:bg-zinc-800 active:bg-black text-white font-medium px-5 py-2.5 text-sm shadow-sm hover:shadow disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-zinc-900 focus:ring-offset-2 transition-colors"
+              >
+                {submitting ? <Loader2 className="size-4 animate-spin" aria-hidden="true" /> : <>Import {parsed.data_quality.rows} rows</>}
+              </button>
             </div>
           </div>
         </div>
