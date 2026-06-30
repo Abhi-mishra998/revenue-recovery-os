@@ -1,24 +1,44 @@
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import { api } from "@/lib/api";
 import { Toaster } from "sonner";
 import "@/App.css";
 
+// Eager-load the first-paint critical surface — auth, onboarding, layout chrome.
+// These are the pages a cold visitor lands on. Keeping them in main.js means
+// they render without a network round-trip for a chunk.
 import Layout from "@/components/Layout";
 import Login from "@/pages/Login";
 import Register from "@/pages/Register";
-import AuthCallback from "@/pages/AuthCallback";
-import Dashboard from "@/pages/Dashboard";
-import Proposals from "@/pages/Proposals";
-import ProposalDetail from "@/pages/ProposalDetail";
-import Invoices from "@/pages/Invoices";
-import Clients from "@/pages/Clients";
-import ClientDetail from "@/pages/ClientDetail";
-import Admin from "@/pages/Admin";
-import Settings from "@/pages/Settings";
 import Welcome from "@/pages/Welcome";
-import RevenueHealth from "@/pages/RevenueHealth";
+
+// Lazy-load everything else. Each page becomes its own chunk that Vercel/CDN
+// caches separately, and the user only downloads what they navigate to.
+// Reduces main.js by ~225 KiB per the Lighthouse audit, which is what was
+// dominating LCP at 6.1 s.
+const AuthCallback = lazy(() => import("@/pages/AuthCallback"));
+const Dashboard = lazy(() => import("@/pages/Dashboard"));
+const Proposals = lazy(() => import("@/pages/Proposals"));
+const ProposalDetail = lazy(() => import("@/pages/ProposalDetail"));
+const Invoices = lazy(() => import("@/pages/Invoices"));
+const Clients = lazy(() => import("@/pages/Clients"));
+const ClientDetail = lazy(() => import("@/pages/ClientDetail"));
+const Admin = lazy(() => import("@/pages/Admin"));
+const Settings = lazy(() => import("@/pages/Settings"));
+const RevenueHealth = lazy(() => import("@/pages/RevenueHealth"));
+
+// Minimum-friction fallback — reserved space (no layout shift), brief spinner.
+function PageFallback() {
+  return (
+    <div className="min-h-screen grid place-items-center" data-testid="route-loading">
+      <div className="flex flex-col items-center gap-3 text-zinc-500">
+        <div className="revora-spinner" />
+        <div className="text-[12px] uppercase tracking-[0.16em]">Loading</div>
+      </div>
+    </div>
+  );
+}
 
 function Protected({ children }) {
   const { user, loading } = useAuth();
@@ -71,31 +91,37 @@ function AppRouter() {
   // Detect Emergent Google OAuth callback synchronously during render to avoid race conditions.
   // REMINDER: DO NOT HARDCODE THE URL, OR ADD ANY FALLBACKS OR REDIRECT URLS, THIS BREAKS THE AUTH
   if (location.hash && location.hash.includes("session_id=")) {
-    return <AuthCallback />;
+    return (
+      <Suspense fallback={<PageFallback />}>
+        <AuthCallback />
+      </Suspense>
+    );
   }
 
   return (
-    <Routes>
-      <Route path="/login" element={<PublicOnly><Login /></PublicOnly>} />
-      <Route path="/register" element={<PublicOnly><Register /></PublicOnly>} />
+    <Suspense fallback={<PageFallback />}>
+      <Routes>
+        <Route path="/login" element={<PublicOnly><Login /></PublicOnly>} />
+        <Route path="/register" element={<PublicOnly><Register /></PublicOnly>} />
 
-      {/* /welcome runs full-bleed (no Layout chrome) so onboarding doesn't show empty sidebar links */}
-      <Route path="/welcome" element={<Protected><Welcome /></Protected>} />
+        {/* /welcome runs full-bleed (no Layout chrome) so onboarding doesn't show empty sidebar links */}
+        <Route path="/welcome" element={<Protected><Welcome /></Protected>} />
 
-      <Route element={<Protected><OnboardingGuard><Layout /></OnboardingGuard></Protected>}>
-        <Route path="/" element={<Dashboard />} />
-        <Route path="/health" element={<RevenueHealth />} />
-        <Route path="/proposals" element={<Proposals />} />
-        <Route path="/proposals/:id" element={<ProposalDetail />} />
-        <Route path="/invoices" element={<Invoices />} />
-        <Route path="/clients" element={<Clients />} />
-        <Route path="/clients/:id" element={<ClientDetail />} />
-        <Route path="/admin" element={<Admin />} />
-        <Route path="/settings" element={<Settings />} />
-      </Route>
+        <Route element={<Protected><OnboardingGuard><Layout /></OnboardingGuard></Protected>}>
+          <Route path="/" element={<Dashboard />} />
+          <Route path="/health" element={<RevenueHealth />} />
+          <Route path="/proposals" element={<Proposals />} />
+          <Route path="/proposals/:id" element={<ProposalDetail />} />
+          <Route path="/invoices" element={<Invoices />} />
+          <Route path="/clients" element={<Clients />} />
+          <Route path="/clients/:id" element={<ClientDetail />} />
+          <Route path="/admin" element={<Admin />} />
+          <Route path="/settings" element={<Settings />} />
+        </Route>
 
-      <Route path="*" element={<Navigate to="/" replace />} />
-    </Routes>
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </Suspense>
   );
 }
 

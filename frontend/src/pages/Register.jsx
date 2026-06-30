@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
+import { warmupBackend } from "@/lib/warmup";
 
 function formatErr(detail) {
   if (!detail) return "Something went wrong";
@@ -16,6 +17,10 @@ export default function Register() {
   const [form, setForm] = useState({ name: "", email: "", password: "" });
   const [loading, setLoading] = useState(false);
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
+
+  // Wake Render the moment the form mounts — by the time the user fills it
+  // out and clicks submit, the backend is warm (no cold-start delay).
+  useEffect(() => { warmupBackend(); }, []);
 
   const submit = async (e) => {
     e.preventDefault();

@@ -3,8 +3,17 @@
     <head>
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <meta name="theme-color" content="#000000" />
-        <meta name="description" content="A product of emergent.sh" />
+        <meta name="theme-color" content="#09090b" />
+        <meta name="description" content="Revora finds the revenue your spreadsheet is hiding. Upload your CRM data — get a Revenue Health report with what's at risk, why, and what to do today." />
+        <meta property="og:title" content="Revora — finds the revenue your spreadsheet is hiding" />
+        <meta property="og:description" content="Upload your CRM data, get a Revenue Health report. Every number signed and chained — auditable." />
+        <meta property="og:type" content="website" />
+
+        <!-- Preconnect to the API origin so the first fetch doesn't pay DNS+TLS RTT.
+             Saves ~200-400 ms on the first auth call (signup / login). -->
+        <link rel="preconnect" href="https://revora-backend-1in4.onrender.com" crossorigin />
+        <link rel="dns-prefetch" href="https://revora-backend-1in4.onrender.com" />
+
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
         <link href="https://fonts.googleapis.com/css2?family=Inter:wght@600&display=swap" rel="stylesheet" />
@@ -21,9 +30,10 @@
         work correctly both with client-side routing and a non-root public URL.
         Learn how to configure a non-root public URL by running `npm run build`.
         -->
-        <title>Emergent | Fullstack App</title>
+        <title>Revora — finds the revenue your spreadsheet is hiding</title>
         <script>window.addEventListener("error",function(e){if(e.error instanceof DOMException&&e.error.name==="DataCloneError"&&e.message&&e.message.includes("PerformanceServerTiming")){e.stopImmediatePropagation();e.preventDefault()}},true);</script>
-        <script src="https://assets.emergent.sh/scripts/emergent-main.js"></script>
+        <!-- Defer emergent-main.js so it doesn't block first paint (was the 1140ms render-blocking culprit in the Lighthouse audit). -->
+        <script src="https://assets.emergent.sh/scripts/emergent-main.js" defer></script>
     </head>
     <body>
         <noscript>You need to enable JavaScript to run this app.</noscript>

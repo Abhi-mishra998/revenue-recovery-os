@@ -170,6 +170,13 @@ export default function Login() {
   const [password, setPassword] = useState("ByteHubble@2025");
   const [loading, setLoading] = useState(false);
 
+  // Wake the Render backend the moment the Login form mounts. By the time
+  // the founder reads the page and clicks Sign in, the backend is already
+  // warm — no cold-start delay on the most user-visible action.
+  useEffect(() => {
+    import("@/lib/warmup").then((m) => m.warmupBackend()).catch(() => {});
+  }, []);
+
   const submit = async (e) => {
     e.preventDefault();
     setLoading(true);
