@@ -11,7 +11,7 @@
 
 1. **Pre-warm Render** (free tier sleeps after 15 min idle — first request after sleep is 15-30 s).
    Open <https://revora-backend-1in4.onrender.com/api/> in a tab and refresh until you see `{"app":"Revora","status":"ok"}`. Keep that tab open.
-2. **Sign in** to <https://revenue-recovery-os1.vercel.app> as `founder@bytehubble.com` / `Render98@M` in your main browser.
+2. **Sign in** to <https://revenue-recovery-os1.vercel.app> as `founder@bytehubble.com` / `ByteHubble@2025` in your main browser.
 3. **Open `/health`** once — this triggers the page render so subsequent navigations are instant.
 4. **Open `/admin`** in a second tab. Scroll to the "Audit log" section. You'll click "Verify chain" during Beat 2.
 5. **Start your screen recording** — Chrome zoom 100 %, 1440 × 900 window, no extensions visible.
