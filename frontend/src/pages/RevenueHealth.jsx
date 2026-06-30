@@ -90,13 +90,13 @@ function VisibilityScoreCard({ score, delta, label, reasons, breakdown, benchmar
     <section className="rounded-xl border bg-white p-6 shadow-sm" data-testid="visibility-card">
       <div className="text-[12px] uppercase tracking-[0.16em] text-zinc-500">Revenue Visibility</div>
       <div className="flex items-center gap-6 mt-3">
-        <svg width="170" height="170" viewBox="0 0 170 170" className="shrink-0">
-          <circle cx="85" cy="85" r={radius} stroke="#f1f5f9" strokeWidth="14" fill="none" />
+        <svg width="170" height="170" viewBox="0 0 170 170" className="shrink-0" role="img" aria-label={`Revenue Visibility ${score} of 100, ${label}`}>
+          <circle cx="85" cy="85" r={radius} stroke="var(--border, #e4e4e7)" strokeWidth="14" fill="none" />
           <circle
             cx="85"
             cy="85"
             r={radius}
-            stroke="#0f172a"
+            stroke="var(--brand-ink, #09090b)"
             strokeWidth="14"
             fill="none"
             strokeLinecap="round"
@@ -104,7 +104,7 @@ function VisibilityScoreCard({ score, delta, label, reasons, breakdown, benchmar
             strokeDashoffset={offset}
             transform="rotate(-90 85 85)"
           />
-          <text x="85" y="92" textAnchor="middle" className="font-semibold" fontSize="36">
+          <text x="85" y="92" textAnchor="middle" className="font-semibold tnum" fontSize="36" fill="var(--text, #18181b)">
             {score}
           </text>
         </svg>

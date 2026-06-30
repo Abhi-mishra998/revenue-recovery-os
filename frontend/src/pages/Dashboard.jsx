@@ -132,7 +132,7 @@ export default function Dashboard() {
 
           <div className="mt-3 divide-y" style={{ borderColor: "var(--border-soft)" }}>
             {(summary?.top_at_risk || []).length === 0 && (
-              <div className="text-sm text-zinc-400 py-6 text-center" data-testid="top-risk-empty">
+              <div className="text-sm text-zinc-600 py-6 text-center" data-testid="top-risk-empty">
                 Nothing at risk. You&apos;re caught up.
               </div>
             )}

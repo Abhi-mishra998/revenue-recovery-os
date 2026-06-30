@@ -53,8 +53,8 @@ export function MorningBriefCard() {
             </span>
           )}
         </div>
-        <Button variant="ghost" size="sm" onClick={refresh} disabled={refreshing} data-testid="brief-refresh">
-          {refreshing ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
+        <Button variant="ghost" size="sm" onClick={refresh} disabled={refreshing} data-testid="brief-refresh" aria-label={refreshing ? "Refreshing brief" : "Regenerate Morning Brief"} title="Regenerate Morning Brief">
+          {refreshing ? <Loader2 className="size-4 animate-spin" aria-hidden="true" /> : <RefreshCw className="size-4" aria-hidden="true" />}
         </Button>
       </div>
       <h2 className="mt-3 text-[18px] font-semibold">{brief.brief?.headline}</h2>

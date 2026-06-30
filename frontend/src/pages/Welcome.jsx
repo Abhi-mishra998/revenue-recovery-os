@@ -354,11 +354,40 @@ export default function Welcome() {
     );
   }
 
-  // committing
+  // committing — skeleton placeholders for the report cards that are about
+  // to appear, so the founder sees the page shape before /health renders.
   return (
-    <div className="min-h-screen grid place-items-center p-6 bg-zinc-50" data-testid="welcome-page">
-      <div className="flex items-center gap-3 text-zinc-600">
-        <Loader2 className="size-5 animate-spin" /> Importing…
+    <div className="min-h-screen p-6 md:p-10 bg-zinc-50" data-testid="welcome-page">
+      <div className="max-w-[1100px] mx-auto">
+        <div className="flex items-center gap-3 text-zinc-700 mb-6" role="status" aria-live="polite">
+          <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+          <span className="text-[14px] font-medium">Importing your data and computing Revenue Health…</span>
+        </div>
+        <div className="space-y-4">
+          <div className="rounded-xl border bg-white p-6 shadow-sm">
+            <div className="h-3 w-32 rounded bg-zinc-200 animate-pulse" />
+            <div className="mt-4 flex items-center gap-6">
+              <div className="size-[170px] rounded-full bg-zinc-100 animate-pulse" />
+              <div className="flex-1 space-y-3">
+                <div className="h-4 w-24 rounded bg-zinc-200 animate-pulse" />
+                <div className="h-3 w-40 rounded bg-zinc-100 animate-pulse" />
+                <div className="h-3 w-56 rounded bg-zinc-100 animate-pulse" />
+              </div>
+            </div>
+          </div>
+          <div className="rounded-xl border bg-white p-6 shadow-sm">
+            <div className="h-3 w-40 rounded bg-zinc-200 animate-pulse" />
+            <div className="mt-4 space-y-3">
+              {[1, 2, 3].map((i) => (
+                <div key={i} className="flex items-center gap-3">
+                  <div className="size-6 rounded-full bg-zinc-100 animate-pulse" />
+                  <div className="h-3 flex-1 rounded bg-zinc-100 animate-pulse" />
+                  <div className="h-3 w-16 rounded bg-zinc-100 animate-pulse" />
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );

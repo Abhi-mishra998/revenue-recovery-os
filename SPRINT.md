@@ -41,7 +41,7 @@ Plus the **Revenue Visibility Score (0-100)** — composite metric with label (P
 **The "5 engines" framing is INTERNAL ONLY.** Not in UI. Not in deck. Not in submission copy. Demo deck story is the 5-step founder narrative below (§12).
 
 **Why this phrasing (not "AI CRM", not "Digital COO")**:
-- "AI CRM" sounds like every me-too. Monaco ($35M, Founders Fund, Feb 2026), Reevo, Aurasell, Lightfield, Attio are spending real money to own that label — don't compete on their playing field with 6 days.
+- "AI CRM" sounds like every me-too. Monaco ($35M, Founders Fund, led by Sam Blond), Reevo, Aurasell, Lightfield, Attio are spending real money to own that label — don't compete on their playing field with 6 days.
 - "Digital COO" overpromises autonomy. Contest judges are SMB founders, not AI investors; vapor pitches lose to "I uploaded my Excel and recovered ₹8 L".
 - "Revenue Health + Do These Today" is concrete, founder-language, and matches what the screen actually shows.
 
@@ -478,6 +478,6 @@ Five slides. No "agent". No "five engines". The product IS the deck.
 - [CXO Digitalpulse — Drive AI adoption among Indian businesses](https://www.cxodigitalpulse.com/emergent-and-raj-shamani-launch-%E2%82%B91-crore-challenge-to-drive-ai-adoption-among-indian-businesses/)
 - [Reevo — AI-Native CRM 2026 guide](https://reevo.ai/blog/ai-native-crm-guide)
 - [SaaStr — Which CRM Should You Use in 2026/2027? Follow the Agents](https://www.saastr.com/which-crm-should-you-use-in-2026-2027-follow-the-agents/)
-- [The Wire — Silicon Road Ventures ₹150 Cr India fund for B2B Agentic AI](https://m.thewire.in/article/ptiprnews/usa-based-silicon-road-ventures-launches-india-focused-aif-to-back-b2b-agentic-ai-commerce-tech-startups/amp?utm=relatedarticles)
+- [The Wire — Silicon Road Ventures ₹150 Cr India fund for B2B Agentic AI](https://thewire.in/article/ptiprnews/usa-based-silicon-road-ventures-launches-india-focused-aif-to-back-b2b-agentic-ai-commerce-tech-startups)
 - [MindStudio — Six-Layer Agentic Operating System stack](https://www.mindstudio.ai/blog/what-is-agentic-operating-system)
 - [Inc42 — Indian AI Startup Tracker 2026](https://inc42.com/startups/indian-ai-startup-tracker/)
