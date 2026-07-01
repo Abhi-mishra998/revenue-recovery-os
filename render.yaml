@@ -38,12 +38,12 @@ services:
         value: abhishek.mishra@bytehubble.ai,founder@bytehubble.com
       - key: ADMIN_PASSWORD
         sync: false
-      - key: EMERGENT_LLM_KEY
-        sync: false  # same value as local .env
+      - key: ANTHROPIC_API_KEY
+        sync: false  # paste sk-ant-... in Render UI (same value as local .env)
       - key: AI_PROVIDER
-        value: emergent_gemini
+        value: anthropic
       - key: AI_MODEL
-        value: gemini-2.5-flash
+        value: claude-haiku-4-5-20251001
       - key: CORS_ORIGINS
         sync: false  # paste Vercel URL after frontend deploys
       - key: RATE_LIMIT_ENABLED
