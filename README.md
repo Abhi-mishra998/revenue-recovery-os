@@ -161,10 +161,3 @@ revenue-recovery-os/
 ```
 
 ---
-
-<div align="center">
-
-Built for the [Raj Shamani × Emergent](https://emergent.sh) contest.
-Made in Bengaluru by [ByteHubble](https://bytehubble.ai).
-
-</div>
